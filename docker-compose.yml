@@ -1,13 +1,18 @@
 services:
-  discord-bot:
-    build: .
-    container_name: discord_bot
-    env_file:
-      - .env
-    restart: always
+  bot:
+    build: ./bot
+    env_file: .env
+    depends_on:
+      - python_app
     networks:
-      - bot-network
+      - botnet
+    restart: always
+
+  python_app:
+    build: ./python
+    networks:
+      - botnet
+    restart: always
 
 networks:
-  bot-network:
-    driver: bridge
+  botnet:
