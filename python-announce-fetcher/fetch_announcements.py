@@ -9,7 +9,7 @@ LAST_CHECK_FILE = "last_check.txt"
 DATA_URL = "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/main/userInformations.json"
 
 # loggingの設定
-logging.basicConfig(level=logging.INFO)  # ログレベルをINFOにして冗長なログを減らす
+# logging.basicConfig(level=logging.INFO)  # ログレベルをINFOにして冗長なログを減らす
 
 # 前回のチェック時刻を取得
 def get_last_check_time():

@@ -5,13 +5,24 @@ services:
       - ./data:/app/data
     env_file: .env
     depends_on:
-      - python_app
+      - python_result_calc
+      - python_announce_fetcher
     networks:
       - botnet
     restart: always
 
-  python_app:
-    build: ./python
+  python_result_calc:
+    build:
+      context: ./python-result-calc
+      dockerfile: Dockerfile
+    networks:
+      - botnet
+    restart: always
+
+  python_announce_fetcher:
+    build:
+      context: ./python-announce-fetcher
+      dockerfile: Dockerfile
     networks:
       - botnet
     restart: always

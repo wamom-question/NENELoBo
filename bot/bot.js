@@ -6,13 +6,18 @@ import fetch from 'node-fetch';
 import fs from 'fs';
 import { setupBumpNoticeHandler, handleNextBumpCommand, setupNextBumpOnStartup } from './BumpNotice.js';
 import { performSimpleGachaDraw, performGacha100, performGacha10, calculateCombinationProbability } from './gacha.js';
+import { Blob } from 'buffer';
+import FormData from 'form-data';
 
 // 環境変数から設定を読み込む
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
 const channelId = process.env.ANNOUNCEMENT_CHANNEL_ID;  // お知らせを送るチャンネルID
 const guildId = process.env.GUILD_ID; // テスト用のギルドID
-const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python_app:5000/announcements'; // PythonのAPIエンドポイント
+const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python_announce_fetcher:5000/announcements'; // PythonのAPIエンドポイント
+
+// OCR APIエンドポイント
+const OCR_API_URL = 'http://python_result_calc:5000/ocr';
 
 // クライアントの作成
 const client = new Client({
@@ -106,7 +111,7 @@ let latestAnnouncementText = null;
 
 async function fetchAnnouncementText() {
   try {
-    const response = await fetch('http://python_app:5000/announcements');
+    const response = await fetch(ANNOUNCEMENT_API);
     const text = await response.text();
     if (text && text.trim() !== "新しいお知らせはありません。") {
       return text;
@@ -280,6 +285,88 @@ client.on('interactionCreate', async interaction => {
     }
   } else if (interaction.commandName === 'nextbump') {
     await handleNextBumpCommand(interaction, client);
+  }
+});
+
+// メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (message.mentions.has(client.user) && message.attachments.size > 0) {
+    const isDebug = message.content.toLowerCase().includes('debug');
+    for (const attachment of message.attachments.values()) {
+      if (attachment.contentType && attachment.contentType.startsWith('image')) {
+        try {
+          // node-fetch v3以降推奨: response.arrayBuffer() でbuffer取得
+          const response = await fetch(attachment.url);
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+
+          const form = new FormData();
+          form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
+          form.append('debug', isDebug ? '1' : '0');
+
+          const ocrRes = await fetch(OCR_API_URL, {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders()
+          });
+          const result = await ocrRes.json();
+
+          if (result && result.results && result.results.length > 0) {
+            let reply = result.results.map(player => {
+              if (player.error) {
+                return `Player_${player.player}: 認識失敗 (${player.error})`;
+              } else {
+                return [
+                  `### Player_${player.player} 認識結果`,
+                  '```',
+                  `PERFECT(3)  : ${player.perfect}`,
+                  `GREAT(2)    : ${player.great}`,
+                  `GOOD(1)     : ${player.good}`,
+                  `BAD(0)      : ${player.bad}`,
+                  `MISS(0)     : ${player.miss}`,
+                  '```',
+                  '',
+                  `## ランクマスコア  ${player.score}`
+                ].join('\n');
+              }
+            }).join('\n\n');
+            await message.reply(reply);
+          } else {
+            await message.reply('画像から有効なスコアが認識できませんでした。');
+          }
+
+          // デバッグ用画像・サマリーがAPIレスポンスに含まれていれば送信
+          if (isDebug && result.debug_image_base64) {
+            // Base64データをBufferに変換してDiscordに送信
+            const imageBuffer = Buffer.from(result.debug_image_base64, 'base64');
+            await message.channel.send({ content: '（デバッグ用）読み取り部分にラベルをつけた画像です:', files: [{ attachment: imageBuffer, name: 'labeled_result.png' }] });
+          }
+          if (isDebug && result.debug_summary) {
+            await message.channel.send(`${message.author.toString()} の認識結果:\n${result.debug_summary}`);
+          }
+          // 各プレイヤーのデバッグ画像・パラメータも送信
+          if (isDebug && result.results && Array.isArray(result.results)) {
+            for (const player of result.results) {
+              if (player.crop_image_base64) {
+                const cropBuf = Buffer.from(player.crop_image_base64, 'base64');
+                await message.channel.send({ content: `Player_${player.player} 切り抜き画像`, files: [{ attachment: cropBuf, name: `player${player.player}_crop.png` }] });
+              }
+              if (player.preprocessed_image_base64) {
+                const preBuf = Buffer.from(player.preprocessed_image_base64, 'base64');
+                await message.channel.send({ content: `Player_${player.player} 前処理後画像`, files: [{ attachment: preBuf, name: `player${player.player}_preprocessed.png` }] });
+              }
+              if (player.preprocess_params) {
+                await message.channel.send({ content: `Player_${player.player} 前処理パラメータ: \n${JSON.stringify(player.preprocess_params, null, 2)}` });
+              }
+            }
+          }
+        } catch (err) {
+          await message.reply('OCR API通信または画像処理でエラーが発生しました。');
+          console.error(err);
+        }
+      }
+    }
   }
 });
 
