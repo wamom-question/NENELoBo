@@ -313,25 +313,72 @@ client.on('messageCreate', async (message) => {
           const result = await ocrRes.json();
 
           if (result && result.results && result.results.length > 0) {
-            let reply = result.results.map(player => {
-              if (player.error) {
-                return `Player_${player.player}: 認識失敗 (${player.error})`;
-              } else {
-                return [
-                  `### Player_${player.player} 認識結果`,
-                  '```',
-                  `PERFECT(3)  : ${player.perfect}`,
-                  `GREAT(2)    : ${player.great}`,
-                  `GOOD(1)     : ${player.good}`,
-                  `BAD(0)      : ${player.bad}`,
-                  `MISS(0)     : ${player.miss}`,
-                  '```',
-                  '',
-                  `## ランクマスコア  ${player.score}`
-                ].join('\n');
+            if (result.results.length >= 2) {
+              // 2人以上なら表形式＋順位でまとめて返信
+              const fields = ['perfect', 'great', 'good', 'bad', 'miss', 'score'];
+              const labels = [
+                'PERFECT(3)', 'GREAT(2)', 'GOOD(1)', 'BAD(0)', 'MISS(0)', 'score'
+              ];
+              const table = fields.map(() => []);
+              result.results.forEach(player => {
+                table[0].push(player.perfect);
+                table[1].push(player.great);
+                table[2].push(player.good);
+                table[3].push(player.bad);
+                table[4].push(player.miss);
+                table[5].push(player.score);
+              });
+
+              let header = '              ' + table[0].map((_, i) => (i+1).toString().padEnd(4)).join(' ');
+              let lines = [header];
+              for (let i = 0; i < fields.length; i++) {
+                let row = labels[i].padEnd(12) + ': ';
+                row += table[i].map(v => String(v).padEnd(4)).join(' ');
+                lines.push(row);
               }
-            }).join('\n\n');
-            await message.reply(reply);
+
+              // スコアで順位付け
+              const scores = result.results.map((p, i) => ({ idx: i + 1, score: p.score }));
+              scores.sort((a, b) => b.score - a.score);
+              const rankLines = scores.map((s, i) => {
+                const rank = i + 1;
+                const player = `Player_${s.idx}`;
+                if (rank === 1) return `# 1位    ${player}`;
+                if (rank === 2) return `## 2位    ${player}`;
+                if (rank === 3) return `## 3位    ${player}`;
+                return `${rank}位    ${player}`;
+              });
+
+              const reply = [
+                '### 認識結果',
+                '```',
+                ...lines,
+                '```',
+                ...rankLines
+              ].join('\n');
+              await message.reply(reply);
+            } else {
+              // 1人だけなら従来通り
+              let reply = result.results.map(player => {
+                if (player.error) {
+                  return `Player_${player.player}: 認識失敗 (${player.error})`;
+                } else {
+                  return [
+                    `### Player_${player.player} 認識結果`,
+                    '```',
+                    `PERFECT(3)  : ${player.perfect}`,
+                    `GREAT(2)    : ${player.great}`,
+                    `GOOD(1)     : ${player.good}`,
+                    `BAD(0)      : ${player.bad}`,
+                    `MISS(0)     : ${player.miss}`,
+                    '```',
+                    '',
+                    `## ランクマスコア  ${player.score}`
+                  ].join('\n');
+                }
+              }).join('\n\n');
+              await message.reply(reply);
+            }
           } else {
             await message.reply('画像から有効なスコアが認識できませんでした。');
           }
