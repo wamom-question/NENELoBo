@@ -1,6 +1,8 @@
 services:
   bot:
     build: ./bot
+    volumes:
+      - ./data:/app/data
     env_file: .env
     depends_on:
       - python_app
