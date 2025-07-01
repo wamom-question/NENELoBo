@@ -27,7 +27,6 @@ def preprocess_image_for_ocr(image, threshold=180, blur_ksize=5, contrast=1.0, r
     result = cv2.bitwise_and(img, img, mask=cv2.bitwise_not(combined_mask))
     result[combined_mask != 0] = [255, 255, 255]
     gray_result = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
-    # コントラスト調整
     gray_result = cv2.convertScaleAbs(gray_result, alpha=contrast, beta=0)
     _, thresh = cv2.threshold(gray_result, threshold, 255, cv2.THRESH_BINARY_INV)
     if blur_ksize > 1:
@@ -129,10 +128,8 @@ def ocr_endpoint():
             preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
             ocr_text_list = extract_score_with_easyocr(preprocessed_right)
             if debug and debug_crop_b64 is None:
-                # 切り抜き画像base64
                 _, crop_buf = cv2.imencode('.png', right_half)
                 debug_crop_b64 = base64.b64encode(crop_buf.tobytes()).decode('utf-8')
-                # 前処理画像base64
                 _, pre_buf = cv2.imencode('.png', preprocessed_right)
                 debug_pre_b64 = base64.b64encode(pre_buf.tobytes()).decode('utf-8')
                 debug_params = {
@@ -143,12 +140,10 @@ def ocr_endpoint():
                 }
             if len(ocr_text_list) >= 5:
                 break
-        player_debug = {}
         if debug:
             player_debug = {
                 'crop_image_base64': debug_crop_b64,
                 'preprocessed_image_base64': debug_pre_b64,
-                'preprocess_params': debug_params
             }
         if len(ocr_text_list) < 5:
             all_player_scores.append({
@@ -157,7 +152,7 @@ def ocr_endpoint():
                 'ocr_result': ocr_text_list,
                 **player_debug
             })
-            summary_lines.append(f"Player_{player_number}: 状態=スコア認識に失敗 \n-# 手動で入力してください。")
+            summary_lines.append(f"Player_{player_number}: 状態=スコア認識に失敗")
             player_number += 1
             continue
         try:
