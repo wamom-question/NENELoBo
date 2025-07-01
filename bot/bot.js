@@ -15,6 +15,7 @@ const clientId = process.env.CLIENT_ID;
 const channelId = process.env.ANNOUNCEMENT_CHANNEL_ID;  // お知らせを送るチャンネルID
 const guildId = process.env.GUILD_ID; // テスト用のギルドID
 const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python_announce_fetcher:5000/announcements'; // PythonのAPIエンドポイント
+const ocrAlwaysChannelId = process.env.OCR_ALWAYS_CHANNEL_ID; // OCRを常に実行するチャンネルID
 
 // OCR APIエンドポイント
 const OCR_API_URL = 'http://python_result_calc:5000/ocr';
@@ -361,7 +362,13 @@ client.on('messageCreate', async (message) => {
               // 1人だけなら従来通り
               let reply = result.results.map(player => {
                 if (player.error) {
-                  return `Player_${player.player}: 認識失敗 (${player.error})`;
+                  if (player.error.startsWith('数値変換に失敗')) {
+                    return `Player_${player.player}: 認識失敗（数値変換エラー）`;
+                  } else if (player.error === 'スコア認識に失敗') {
+                    return `Player_${player.player}: 認識失敗（スコア認識エラー）`;
+                  } else {
+                    return `Player_${player.player}: 認識失敗 (${player.error})`;
+                  }
                 } else {
                   return [
                     `### Player_${player.player} 認識結果`,
@@ -409,7 +416,80 @@ client.on('messageCreate', async (message) => {
             }
           }
         } catch (err) {
-          await message.reply('OCR API通信または画像処理でエラーが発生しました。');
+          await message.react('<:ocr_error:1389568660401684500>');
+          console.error(err);
+        }
+      }
+    }
+  }
+});
+
+// ocrAlwaysChannelId で画像付きメッセージが送信された場合にOCR APIへ送信
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (message.channel.id === ocrAlwaysChannelId && message.attachments.size > 0) {
+    for (const attachment of message.attachments.values()) {
+      if (attachment.contentType && attachment.contentType.startsWith('image')) {
+        try {
+          const response = await fetch(attachment.url);
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+
+          const form = new FormData();
+          form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
+          // debugパラメータは付与しない
+
+          const ocrRes = await fetch(OCR_API_URL, {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders()
+          });
+          const result = await ocrRes.json();
+
+          if (result && result.results && result.results.length > 0) {
+            if (result.results.length >= 2) {
+              // 2人以上ならメンションしてもう一度送るようにリアクション
+              await message.react('<:ocr_error_2player:1389581609883406336>');
+              await new Promise(res => setTimeout(res, 500));
+              await message.react('<:ocr_error_info_mention:1389581588995768472>');
+            } else {
+              // 1人だけならスコアを桁ごとに分解してカスタム絵文字でリアクション（0埋めせず実際の桁数のみ）
+              const player = result.results[0];
+              if (player.error) {
+                if (player.error.startsWith('数値変換に失敗')) {
+                  await message.react('<:ocr_error_convert:1389568868493561967>');
+                } else if (player.error === 'スコア認識に失敗') {
+                  await message.react('<:ocr_error_score:1389573918825775145>');
+                } else {
+                  // その他のエラー
+                  await message.react('<:ocr_error:1389568660401684500>');
+                }
+              } else {
+                // スコアを左から右へ桁ごとに分解し、各桁・数字に対応するカスタム絵文字IDでリアクション
+                const scoreStr = String(player.score);
+                  await message.react('<:ocr_score:1389569033874968576>');
+                  await new Promise(res => setTimeout(res, 500));
+                for (let i = 0; i < scoreStr.length; i++) {
+                  const digit = scoreStr[i];
+                  const pos = i + 1; // 1始まり
+                  const emojiId = process.env[`EMOJI_${digit}_${pos}`];
+                  if (emojiId) {
+                    await message.react(emojiId);
+                    await new Promise(res => setTimeout(res, 500));
+                  }
+                }
+              }
+              // replyは従来通り
+              let reply = [
+                `-# 認識結果 ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`,
+              ].join('\n');
+              await message.reply(reply);
+            }
+          } else {
+            await message.react('<:ocr_error_score:1389573918825775145>');
+          }
+        } catch (err) {
+          await message.react('<:ocr_error:1389568660401684500>');
           console.error(err);
         }
       }
