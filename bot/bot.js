@@ -437,7 +437,6 @@ client.on('messageCreate', async (message) => {
 
           const form = new FormData();
           form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
-          // debugパラメータは付与しない
 
           const ocrRes = await fetch(OCR_API_URL, {
             method: 'POST',
