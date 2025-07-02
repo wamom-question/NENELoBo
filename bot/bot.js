@@ -51,7 +51,7 @@ const commands = [
     .toJSON(),
   // メッセージコンテキストメニューコマンドを追加
   {
-    name: 'リアクションする',
+    name: 'リアクション',
     type: 3 // 3 = MESSAGE
   }
 ];
@@ -291,15 +291,51 @@ client.on('interactionCreate', async interaction => {
     }
   } else if (interaction.isMessageContextMenuCommand && interaction.isMessageContextMenuCommand()) {
     // メッセージコンテキストメニューコマンド
-    if (interaction.commandName === '「わかった」リアクション') {
-      try {
-        const message = await interaction.channel.messages.fetch(interaction.targetId);
-        await message.react('<:wakatta:1389786764696223756>');
-        await interaction.reply({ content: '👍 リアクションしました！', ephemeral: true });
-      } catch (err) {
-        await interaction.reply({ content: 'リアクションに失敗しました。', ephemeral: true });
-        console.error(err);
+    if (interaction.commandName === 'リアクション') {
+      // セレクトメニューを表示
+      const { ActionRowBuilder, StringSelectMenuBuilder } = await import('discord.js');
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('reaction_select')
+        .setPlaceholder('リアクションを選択してください')
+        .addOptions([
+          { label: 'わかった', value: 'wakatta', emoji: '<:wakatta:1389786764696223756>' },
+          { label: '済', value: 'henshin_sumi', emoji: '<:henshin_sumi:1389904864347291668>' },
+          { label: '感謝', value: 'henshin_kansya', emoji: '<:henshin_kansya:1389905209634984086>' }
+          { label: 'OK', value: 'henshin_ok', emoji: '<:henshin_ok:1389905534768906280>' }
+        ]);
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+      await interaction.reply({ content: 'リアクションを選択してください', components: [row], ephemeral: true });
+    }
+  } else if (interaction.isStringSelectMenu && interaction.customId === 'reaction_select') {
+    // セレクトメニューの選択肢に応じてリアクション
+    try {
+      const message = await interaction.channel.messages.fetch(interaction.message.interaction.targetId);
+      let emoji;
+      switch (interaction.values[0]) {
+        case 'wakatta':
+          emoji = '<:wakatta:1389786764696223756>';
+          break;
+        case 'thumbsup':
+          emoji = 'henshin_sumi';
+          break;
+        case 'henshin_kansya':
+          emoji = '<:henshin_kansya:1389905209634984086>';
+          break;
+        case 'henshin_ok':
+          emoji = '<:henshin_ok:1389905534768906280>';
+          break;
+        default:
+          emoji = null;
       }
+      if (emoji) {
+        await message.react(emoji);
+        await interaction.update({ content: 'リアクションしました！', components: [] });
+      } else {
+        await interaction.update({ content: 'リアクションに失敗しました。', components: [] });
+      }
+    } catch (err) {
+      await interaction.update({ content: 'リアクションに失敗しました。', components: [] });
+      console.error(err);
     }
   } else if (interaction.commandName === 'nextbump') {
     await handleNextBumpCommand(interaction, client);

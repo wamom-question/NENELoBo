@@ -195,8 +195,8 @@ def ocr_endpoint():
                 good_val    = int(ocr_text_list[2])
                 bad_val     = int(ocr_text_list[3])
                 miss_val    = int(ocr_text_list[4])
-                # PERFECTが0の場合は再度OCRを試みる
-                if perfect_val == 0:
+                # PERFECTが0の場合やGREATがPERFECTの1.5倍以上の場合は再度OCRを試みる
+                if perfect_val == 0 or (perfect_val > 0 and great_val >= perfect_val * 1.5):
                     retry_ocr = False
                     for _ in range(5):
                         threshold = np.random.randint(140, 200)
@@ -208,9 +208,10 @@ def ocr_endpoint():
                         if len(retry_ocr_text_list) >= 5:
                             try:
                                 retry_perfect = int(retry_ocr_text_list[0])
-                                if retry_perfect != 0:
+                                retry_great   = int(retry_ocr_text_list[1])
+                                if retry_perfect != 0 and not (retry_perfect > 0 and retry_great >= retry_perfect * 1.5):
                                     perfect_val = retry_perfect
-                                    great_val   = int(retry_ocr_text_list[1])
+                                    great_val   = retry_great
                                     good_val    = int(retry_ocr_text_list[2])
                                     bad_val     = int(retry_ocr_text_list[3])
                                     miss_val    = int(retry_ocr_text_list[4])
@@ -221,11 +222,11 @@ def ocr_endpoint():
                     if not retry_ocr:
                         all_player_scores.append({
                             'player': player_number,
-                            'error': 'PERFECTが0のままです',
+                            'error': 'PERFECTが0またはGREATがPERFECTの1.5倍以上のままです',
                             'ocr_result': ocr_text_list,
                             **player_debug
                         })
-                        summary_lines.append(f"Player_{player_number}: 状態=PERFECTが0のままです")
+                        summary_lines.append(f"Player_{player_number}: 状態=PERFECTが0またはGREATがPERFECTの1.5倍以上のままです")
                         player_number += 1
                         continue
                 total_notes = perfect_val + great_val + good_val + bad_val + miss_val
