@@ -38,16 +38,33 @@ def preprocess_image_for_ocr(image, threshold=180, blur_ksize=5, contrast=1.0, r
 def extract_perfect_miss_positions(image):
     preprocessed_img = preprocess_image_for_ocr(image)
     details = pytesseract.image_to_data(preprocessed_img, output_type=pytesseract.Output.DICT)
-    perfect_positions = []
-    miss_positions = []
+    all_perfect_positions = []
+    all_miss_positions = []
+    all_perfect_text_positions = []
+    # まずALL PERFECTの位置を探す
     for i, word in enumerate(details['text']):
+        if 'ALL' in word.upper():
+            # 直後にPERFECTが続く場合も考慮
+            if i+1 < len(details['text']) and 'PERFECT' in details['text'][i+1].upper():
+                x = details['left'][i]
+                y = details['top'][i]
+                w = details['width'][i] + details['width'][i+1]
+                h = max(details['height'][i], details['height'][i+1])
+                all_perfect_text_positions.append((x, y, w, h))
+    # ALL PERFECTを黒塗り
+    blackout_img = preprocessed_img.copy()
+    for (x, y, w, h) in all_perfect_text_positions:
+        cv2.rectangle(blackout_img, (x, y), (x + w, y + h), (0, 0, 0), -1)
+    # 黒塗り後の画像で再度ラベル検出
+    details2 = pytesseract.image_to_data(blackout_img, output_type=pytesseract.Output.DICT)
+    for i, word in enumerate(details2['text']):
         if 'PERFECT' in word.upper():
-            (x, y, w, h) = (details['left'][i], details['top'][i], details['width'][i], details['height'][i])
-            perfect_positions.append((x, y, w, h))
+            (x, y, w, h) = (details2['left'][i], details2['top'][i], details2['width'][i], details2['height'][i])
+            all_perfect_positions.append((x, y, w, h))
         if 'MISS' in word.upper():
-            (x, y, w, h) = (details['left'][i], details['top'][i], details['width'][i], details['height'][i])
-            miss_positions.append((x, y, w, h))
-    return perfect_positions, miss_positions
+            (x, y, w, h) = (details2['left'][i], details2['top'][i], details2['width'][i], details2['height'][i])
+            all_miss_positions.append((x, y, w, h))
+    return all_perfect_positions, all_miss_positions
 
 def blackout_positions(image, positions):
     for (x, y, w, h) in positions:
@@ -84,6 +101,23 @@ def ocr_endpoint():
     file.save(in_memory_file)
     data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
     img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+    # 画像のアスペクト比を調整して中央切り抜き
+    h, w = img.shape[:2]
+    target_w = int(5/3 * h)
+    target_h = int(3/5 * w)
+    if w > target_w:
+        # 幅が広すぎる場合、中央から target_w の幅で切り抜き
+        x_start = (w - target_w) // 2
+        img = img[:, x_start:x_start+target_w]
+        w = target_w
+    if h > target_h:
+        # 高さが高すぎる場合、中央から target_h の高さで切り抜き
+        y_start = (h - target_h) // 2
+        img = img[y_start:y_start+target_h, :]
+        h = target_h
+    # 1800x1080にリサイズ
+    img = cv2.resize(img, (1800, 1080), interpolation=cv2.INTER_AREA)
     processed_img = img.copy()
     all_perfect_positions, all_miss_positions = [], []
     for _ in range(5):
@@ -120,6 +154,7 @@ def ocr_endpoint():
         debug_crop_b64 = None
         debug_pre_b64 = None
         debug_params = None
+        player_debug = {}  # debug用の初期化
         for _ in range(10):
             threshold = np.random.randint(140, 200)
             blur_ksize = np.random.choice([3, 5, 7])
@@ -153,48 +188,79 @@ def ocr_endpoint():
                 **player_debug
             })
             summary_lines.append(f"Player_{player_number}: 状態=スコア認識に失敗")
-            player_number += 1
-            continue
-        try:
-            perfect_val = int(ocr_text_list[0])
-            great_val   = int(ocr_text_list[1])
-            good_val    = int(ocr_text_list[2])
-            bad_val     = int(ocr_text_list[3])
-            miss_val    = int(ocr_text_list[4])
-        except Exception as e:
-            all_player_scores.append({
-                'player': player_number,
-                'error': f'数値変換に失敗: {e}',
-                'ocr_result': ocr_text_list
-            })
-            summary_lines.append(f"Player_{player_number}: 状態=数値変換に失敗 \n-# 手動で入力してください。")
-            player_number += 1
-            continue
-        total_notes = perfect_val + great_val + good_val + bad_val + miss_val
-        if total_notes == 0:
-            player_number += 1
-            continue
-        score_raw = (
-            perfect_val * 3 +
-            great_val * 2 +
-            good_val * 1 +
-            bad_val * 0 +
-            miss_val * 0
-        )
-        score = math.floor(score_raw)
-        all_player_scores.append({
-            'player': player_number,
-            'perfect': perfect_val,
-            'great': great_val,
-            'good': good_val,
-            'bad': bad_val,
-            'miss': miss_val,
-            'score': score
-        })
-        summary_lines.append(f"Player_{player_number}: 状態=正常 \n-# PERFECT={perfect_val}, GREAT={great_val}, GOOD={good_val}, BAD={bad_val}, MISS={miss_val}, スコア={score}")
+        else:
+            try:
+                perfect_val = int(ocr_text_list[0])
+                great_val   = int(ocr_text_list[1])
+                good_val    = int(ocr_text_list[2])
+                bad_val     = int(ocr_text_list[3])
+                miss_val    = int(ocr_text_list[4])
+                # PERFECTが0の場合は再度OCRを試みる
+                if perfect_val == 0:
+                    retry_ocr = False
+                    for _ in range(5):
+                        threshold = np.random.randint(140, 200)
+                        blur_ksize = np.random.choice([3, 5, 7])
+                        contrast = np.random.uniform(0.8, 1.5)
+                        resize_ratio = np.random.uniform(0.8, 1.3)
+                        preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
+                        retry_ocr_text_list = extract_score_with_easyocr(preprocessed_right)
+                        if len(retry_ocr_text_list) >= 5:
+                            try:
+                                retry_perfect = int(retry_ocr_text_list[0])
+                                if retry_perfect != 0:
+                                    perfect_val = retry_perfect
+                                    great_val   = int(retry_ocr_text_list[1])
+                                    good_val    = int(retry_ocr_text_list[2])
+                                    bad_val     = int(retry_ocr_text_list[3])
+                                    miss_val    = int(retry_ocr_text_list[4])
+                                    retry_ocr = True
+                                    break
+                            except Exception:
+                                continue
+                    if not retry_ocr:
+                        all_player_scores.append({
+                            'player': player_number,
+                            'error': 'PERFECTが0のままです',
+                            'ocr_result': ocr_text_list,
+                            **player_debug
+                        })
+                        summary_lines.append(f"Player_{player_number}: 状態=PERFECTが0のままです")
+                        player_number += 1
+                        continue
+                total_notes = perfect_val + great_val + good_val + bad_val + miss_val
+                    
+                score_raw = (
+                    perfect_val * 3 +
+                    great_val * 2 +
+                    good_val * 1 +
+                    bad_val * 0 +
+                    miss_val * 0
+                )
+                score = math.floor(score_raw)
+                all_player_scores.append({
+                    'player': player_number,
+                    'perfect': perfect_val,
+                    'great': great_val,
+                    'good': good_val,
+                    'bad': bad_val,
+                    'miss': miss_val,
+                    'score': score
+                })
+                summary_lines.append(f"Player_{player_number}: 状態=正常 \n-# PERFECT={perfect_val}, GREAT={great_val}, GOOD={good_val}, BAD={bad_val}, MISS={miss_val}, スコア={score}")
+            except Exception as e:
+                all_player_scores.append({
+                    'player': player_number,
+                    'error': f'数値変換に失敗: {e}',
+                    'ocr_result': ocr_text_list,
+                    **player_debug
+                })
+                summary_lines.append(f"Player_{player_number}: 状態=数値変換に失敗 \n-# 手動で入力してください。")
         player_number += 1
 
     response = {'results': all_player_scores}
+    if len(all_player_scores) == 0:
+        print('[OCR API] resultsが空配列です。画像内容や検出ロジックを確認してください。')
     if debug:
         # ラベル付き画像をBase64で返す
         labeled_image = draw_labels(img, all_perfect_positions, all_miss_positions)

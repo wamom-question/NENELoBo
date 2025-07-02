@@ -49,6 +49,11 @@ const commands = [
         .setRequired(true)
     )
     .toJSON(),
+  // メッセージコンテキストメニューコマンドを追加
+  {
+    name: 'リアクションする',
+    type: 3 // 3 = MESSAGE
+  }
 ];
 
 // REST APIクライアントを作成してコマンド登録を実施
@@ -172,116 +177,128 @@ async function handleAnnouncementText(text) {
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
-  if (!interaction.isChatInputCommand()) return;
+  if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === 'nenelobo') {
+      const ping = client.ws.ping;
+      await interaction.reply(`BotのPingは${ping}msです！`);
+    } else if (interaction.commandName === 'gacha') {
+      const pulls = interaction.options.getInteger('pulls');
 
-  if (interaction.commandName === 'nenelobo') {
-    const ping = client.ws.ping;
-    await interaction.reply(`BotのPingは${ping}msです！`);
-  } else if (interaction.commandName === 'gacha') {
-    const pulls = interaction.options.getInteger('pulls');
+      if (pulls === 100) {
+        // 100回引く処理
+        const results = [];
+        let star2 = 0, star3 = 0, star4Constant = 0, star4Pickup = 0;
 
-    if (pulls === 100) {
-      // 100回引く処理
-      const results = [];
-      let star2 = 0, star3 = 0, star4Constant = 0, star4Pickup = 0;
+        for (let j = 0; j < 10; j++) {
+          const row = [];
+          let star2Count = 0;
 
-      for (let j = 0; j < 10; j++) {
-        const row = [];
-        let star2Count = 0;
+          // 1〜9回目
+          for (let i = 0; i < 9; i++) {
+            const rand = Math.random() * 100;
+            if (rand < 88.5) { row.push(process.env.EMOJI_STAR2); star2++; star2Count++; }
+            else if (rand < 97) { row.push(process.env.EMOJI_STAR3); star3++; }
+            else if (rand < 98.8) { row.push(process.env.EMOJI_STAR4); star4Pickup++; }
+            else { row.push(process.env.EMOJI_STAR4); star4Constant++; }
+          }
 
-        // 1〜9回目
-        for (let i = 0; i < 9; i++) {
+          // 10回目
           const rand = Math.random() * 100;
-          if (rand < 88.5) { row.push(process.env.EMOJI_STAR2); star2++; star2Count++; }
-          else if (rand < 97) { row.push(process.env.EMOJI_STAR3); star3++; }
-          else if (rand < 98.8) { row.push(process.env.EMOJI_STAR4); star4Pickup++; }
-          else { row.push(process.env.EMOJI_STAR4); star4Constant++; }
+          if (star2Count === 9) {
+            if (rand < 97) { row.push(process.env.EMOJI_STAR3); star3++; }
+            else if (rand < 98.8) { row.push(process.env.EMOJI_STAR4); star4Pickup++; }
+            else { row.push(process.env.EMOJI_STAR4); star4Constant++; }
+          } else {
+            if (rand < 88.5) { row.push(process.env.EMOJI_STAR2); star2++; }
+            else if (rand < 97) { row.push(process.env.EMOJI_STAR3); star3++; }
+            else if (rand < 98.8) { row.push(process.env.EMOJI_STAR4); star4Pickup++; }
+            else { row.push(process.env.EMOJI_STAR4); star4Constant++; }
+          }
+
+          results.push(row);
         }
 
-        // 10回目
-        const rand = Math.random() * 100;
-        if (star2Count === 9) {
-          if (rand < 97) { row.push(process.env.EMOJI_STAR3); star3++; }
-          else if (rand < 98.8) { row.push(process.env.EMOJI_STAR4); star4Pickup++; }
-          else { row.push(process.env.EMOJI_STAR4); star4Constant++; }
-        } else {
-          if (rand < 88.5) { row.push(process.env.EMOJI_STAR2); star2++; }
-          else if (rand < 97) { row.push(process.env.EMOJI_STAR3); star3++; }
-          else if (rand < 98.8) { row.push(process.env.EMOJI_STAR4); star4Pickup++; }
-          else { row.push(process.env.EMOJI_STAR4); star4Constant++; }
+        const thinkingEmbed = new EmbedBuilder()
+          .setTitle('100回引いています...')
+          .setColor('Grey')
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [thinkingEmbed] });
+        const embedMsg = await interaction.fetchReply();
+
+        // 10回ずつephemeralメッセージで送信
+        for (let i = 0; i < results.length; i++) {
+          const chunk = results[i].join(' ');
+          await interaction.followUp({
+            content: chunk,
+            ephemeral: true
+          });
         }
 
-        results.push(row);
-      }
+        // 統計結果でembedを編集
+        const resultEmbed = new EmbedBuilder()
+          .setTitle('100回引きました。')
+          .setDescription(`> 星2..............${star2}枚\n> 星3..............${star3}枚\n> 星4(恒常)...${star4Constant}枚\n> 星4(PU)......${star4Pickup}枚`)
+          .setColor('Green')
+          .setTimestamp();
 
-      const thinkingEmbed = new EmbedBuilder()
-        .setTitle('100回引いています...')
-        .setColor('Grey')
-        .setTimestamp();
+        await embedMsg.edit({ embeds: [resultEmbed] });
+      } else if (pulls === 10) {
+        // 10回引く処理
+        // performGacha10で詳細な内訳とラスト1枠の型を取得
+        const {
+          results,
+          star2Count,
+          star3Count,
+          constantCount,
+          pickupCount,
+          lastDrawType
+        } = performGacha10();
 
-      await interaction.reply({ embeds: [thinkingEmbed] });
-      const embedMsg = await interaction.fetchReply();
+        const line1 = results.slice(0, 5).join(' ');
+        const line2 = results.slice(5).join(' ');
 
-      // 10回ずつephemeralメッセージで送信
-      for (let i = 0; i < results.length; i++) {
-        const chunk = results[i].join(' ');
-        await interaction.followUp({
-          content: chunk,
-          ephemeral: true
-        });
-      }
+        // 組み合わせ確率を計算
+        const draws = [star2Count - (lastDrawType === 'star2' ? 1 : 0),
+                       star3Count - (lastDrawType === 'star3' ? 1 : 0),
+                       constantCount - (lastDrawType === 'constant' ? 1 : 0),
+                       pickupCount - (lastDrawType === 'pickup' ? 1 : 0)];
+        const prob = calculateCombinationProbability(draws, lastDrawType);
+        const percent = (prob * 100).toFixed(4);
 
-      // 統計結果でembedを編集
-      const resultEmbed = new EmbedBuilder()
-        .setTitle('100回引きました。')
-        .setDescription(`> 星2..............${star2}枚\n> 星3..............${star3}枚\n> 星4(恒常)...${star4Constant}枚\n> 星4(PU)......${star4Pickup}枚`)
-        .setColor('Green')
-        .setTimestamp();
+        const summary = [];
+        if (constantCount > 0) summary.push(`恒常が${constantCount}枚出ました。`);
+        if (pickupCount > 0) summary.push(`ピックアップが${pickupCount}枚出ました。`);
+        summary.push(`🎲 この組み合わせが出る確率は約 ${percent}% です。`);
 
-      await embedMsg.edit({ embeds: [resultEmbed] });
-    } else if (pulls === 10) {
-      // 10回引く処理
-      // performGacha10で詳細な内訳とラスト1枠の型を取得
-      const {
-        results,
-        star2Count,
-        star3Count,
-        constantCount,
-        pickupCount,
-        lastDrawType
-      } = performGacha10();
-
-      const line1 = results.slice(0, 5).join(' ');
-      const line2 = results.slice(5).join(' ');
-
-      // 組み合わせ確率を計算
-      const draws = [star2Count - (lastDrawType === 'star2' ? 1 : 0),
-                     star3Count - (lastDrawType === 'star3' ? 1 : 0),
-                     constantCount - (lastDrawType === 'constant' ? 1 : 0),
-                     pickupCount - (lastDrawType === 'pickup' ? 1 : 0)];
-      const prob = calculateCombinationProbability(draws, lastDrawType);
-      const percent = (prob * 100).toFixed(4);
-
-      const summary = [];
-      if (constantCount > 0) summary.push(`恒常が${constantCount}枚出ました。`);
-      if (pickupCount > 0) summary.push(`ピックアップが${pickupCount}枚出ました。`);
-      summary.push(`🎲 この組み合わせが出る確率は約 ${percent}% です。`);
-
-      await interaction.reply(`${line1}\n${line2}`);
-      await interaction.followUp(summary.join('\n'));
-    } else {
-      // 1回引く処理
-      const { results, newMemberCount, slipCount } = performSimpleGachaDraw(pulls);
-
-      const line1 = results.slice(0, 5).join(' ');
-      const line2 = results.slice(5).join(' ');
-      const summary = [];
-      if (slipCount > 0) summary.push(`恒常が${slipCount}枚出ました。`);
-      if (newMemberCount > 0) summary.push(`ピックアップが${newMemberCount}枚出ました。`);
-
-      await interaction.reply(`${line1}\n${line2}`);
-      if (summary.length > 0) {
+        await interaction.reply(`${line1}\n${line2}`);
         await interaction.followUp(summary.join('\n'));
+      } else {
+        // 1回引く処理
+        const { results, newMemberCount, slipCount } = performSimpleGachaDraw(pulls);
+
+        const line1 = results.slice(0, 5).join(' ');
+        const line2 = results.slice(5).join(' ');
+        const summary = [];
+        if (slipCount > 0) summary.push(`恒常が${slipCount}枚出ました。`);
+        if (newMemberCount > 0) summary.push(`ピックアップが${newMemberCount}枚出ました。`);
+
+        await interaction.reply(`${line1}\n${line2}`);
+        if (summary.length > 0) {
+          await interaction.followUp(summary.join('\n'));
+        }
+      }
+    }
+  } else if (interaction.isMessageContextMenuCommand && interaction.isMessageContextMenuCommand()) {
+    // メッセージコンテキストメニューコマンド
+    if (interaction.commandName === '「わかった」リアクション') {
+      try {
+        const message = await interaction.channel.messages.fetch(interaction.targetId);
+        await message.react('<:wakatta:1389786764696223756>');
+        await interaction.reply({ content: '👍 リアクションしました！', ephemeral: true });
+      } catch (err) {
+        await interaction.reply({ content: 'リアクションに失敗しました。', ephemeral: true });
+        console.error(err);
       }
     }
   } else if (interaction.commandName === 'nextbump') {
@@ -387,7 +404,8 @@ client.on('messageCreate', async (message) => {
               await message.reply(reply);
             }
           } else {
-            await message.reply('画像から有効なスコアが認識できませんでした。');
+            await message.react('<:ocr_error_api:1389800393332101311>');
+            console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
 
           // デバッグ用画像・サマリーがAPIレスポンスに含まれていれば送信
@@ -416,7 +434,7 @@ client.on('messageCreate', async (message) => {
             }
           }
         } catch (err) {
-          await message.react('<:ocr_error:1389568660401684500>');
+          await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
           console.error(err);
         }
       }
@@ -485,10 +503,11 @@ client.on('messageCreate', async (message) => {
               await message.reply(reply);
             }
           } else {
-            await message.react('<:ocr_error_score:1389573918825775145>');
+            await message.react('<:ocr_error_api:1389800393332101311>');
+            console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
         } catch (err) {
-          await message.react('<:ocr_error:1389568660401684500>');
+          await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
           console.error(err);
         }
       }
