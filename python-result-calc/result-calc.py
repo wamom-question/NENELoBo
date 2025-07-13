@@ -318,17 +318,47 @@ def ocr_endpoint():
                 ocr_text_list = extract_score_with_easyocr(preprocessed_right)
                 if len(ocr_text_list) >= 5:
                     break
-            if len(ocr_text_list) < 5:
-                all_player_scores_simple.append({
-                    'player': player_number,
-                    'error': 'スコア認識に失敗',
-                    'ocr_result': ocr_text_list
-                })
-                summary_lines_simple.append(f"Player_{player_number}: 状態=スコア認識に失敗 (simple) ")
-            else:
+            # ---ここから再OCRロジック---
+            retry_ocr = False
+            if len(ocr_text_list) >= 5:
                 try:
                     perfect_val = int(ocr_text_list[0])
                     great_val   = int(ocr_text_list[1])
+                    # 再OCR条件
+                    if perfect_val == 0 or (perfect_val > 0 and great_val >= perfect_val * 1.5):
+                        for _ in range(5):
+                            threshold = np.random.randint(140, 200)
+                            blur_ksize = np.random.choice([3, 5, 7])
+                            contrast = np.random.uniform(0.8, 1.5)
+                            resize_ratio = np.random.uniform(0.8, 1.3)
+                            preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
+                            retry_ocr_text_list = extract_score_with_easyocr(preprocessed_right)
+                            if len(retry_ocr_text_list) >= 5:
+                                try:
+                                    retry_perfect = int(retry_ocr_text_list[0])
+                                    retry_great   = int(retry_ocr_text_list[1])
+                                    if retry_perfect != 0 and not (retry_perfect > 0 and retry_great >= retry_perfect * 1.5):
+                                        perfect_val = retry_perfect
+                                        great_val   = retry_great
+                                        good_val    = int(retry_ocr_text_list[2])
+                                        bad_val     = int(retry_ocr_text_list[3])
+                                        miss_val    = int(retry_ocr_text_list[4])
+                                        ocr_text_list = retry_ocr_text_list
+                                        retry_ocr = True
+                                        break
+                                except Exception:
+                                    continue
+                    # ---再OCR後の判定---
+                    if perfect_val == 0 or (perfect_val > 0 and great_val >= perfect_val * 1.5):
+                        all_player_scores_simple.append({
+                            'player': player_number,
+                            'error': 'PERFECTが0またはGREATがPERFECTの1.5倍以上のままです',
+                            'ocr_result': ocr_text_list
+                        })
+                        summary_lines_simple.append(f"Player_{player_number}: 状態=PERFECTが0またはGREATがPERFECTの1.5倍以上のままです (simple)")
+                        player_number += 1
+                        continue
+                    # ---通常のスコア計算---
                     good_val    = int(ocr_text_list[2])
                     bad_val     = int(ocr_text_list[3])
                     miss_val    = int(ocr_text_list[4])
@@ -357,6 +387,13 @@ def ocr_endpoint():
                         'ocr_result': ocr_text_list
                     })
                     summary_lines_simple.append(f"Player_{player_number}: 状態=数値変換に失敗 (simple)")
+            else:
+                all_player_scores_simple.append({
+                    'player': player_number,
+                    'error': 'スコア認識に失敗',
+                    'ocr_result': ocr_text_list
+                })
+                summary_lines_simple.append(f"Player_{player_number}: 状態=スコア認識に失敗 (simple) ")
             player_number += 1
         response['results'] = all_player_scores_simple
         # ラベル画像返却（認識できた場合のみ）
