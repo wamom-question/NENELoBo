@@ -35,8 +35,18 @@ def preprocess_image_for_ocr(image, threshold=180, blur_ksize=5, contrast=1.0, r
         blurred = thresh
     return blurred
 
+def preprocess_image_for_ocr_simple(image):
+    gray_result = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, thresh = cv2.threshold(gray_result, 180, 255, cv2.THRESH_BINARY_INV)
+    blurred = cv2.GaussianBlur(thresh, (5, 5), 0)
+    return blurred
+
 def extract_perfect_miss_positions(image):
-    preprocessed_img = preprocess_image_for_ocr(image)
+    # 画像がグレースケール（2次元）なら前処理スキップ
+    if len(image.shape) == 2:
+        preprocessed_img = image.copy()
+    else:
+        preprocessed_img = preprocess_image_for_ocr(image)
     details = pytesseract.image_to_data(preprocessed_img, output_type=pytesseract.Output.DICT)
     all_perfect_positions = []
     all_miss_positions = []
@@ -260,16 +270,117 @@ def ocr_endpoint():
         player_number += 1
 
     response = {'results': all_player_scores}
+    # 追加: 通常処理でresultsが空の場合、シンプルな下処理で再度OCR
     if len(all_player_scores) == 0:
         print('[OCR API] resultsが空配列です。画像内容や検出ロジックを確認してください。')
-    if debug:
-        # ラベル付き画像をBase64で返す
+        # シンプルな前処理画像で通常の読み取りロジックを再実行
+        simple_img = preprocess_image_for_ocr_simple(img)
+        # ここから通常の流れ
+        processed_img = simple_img.copy()
+        all_perfect_positions, all_miss_positions = [], []
+        for _ in range(5):
+            perfect_positions, miss_positions = extract_perfect_miss_positions(processed_img)
+            if not perfect_positions or not miss_positions:
+                break
+            all_perfect_positions.extend(perfect_positions)
+            all_miss_positions.extend(miss_positions)
+            processed_img = blackout_positions(processed_img, perfect_positions)
+            processed_img = blackout_positions(processed_img, miss_positions)
+        label_regions = []
+        for perfect_pos, miss_pos in zip(all_perfect_positions, all_miss_positions):
+            x_perfect, y_perfect, _, _ = perfect_pos
+            _, y_miss, _, h_miss = miss_pos
+            base_length = (y_miss + h_miss) - y_perfect
+            square_width = int(base_length * 1.3)
+            square_height = int(base_length * 1.2)
+            x_label = max(0, x_perfect - int(base_length * 0.1))
+            y_label = max(0, y_perfect - int(base_length * 0.1))
+            label_regions.append((x_label, y_label, square_width, square_height))
+        label_regions.sort(key=lambda r: r[0])
+        all_player_scores_simple = []
+        player_number = 1
+        summary_lines_simple = []
+        for region in label_regions:
+            x_label, y_label, square_width, square_height = region
+            crop = img[y_label:y_label+square_height, x_label:x_label+square_width]
+            if crop.size == 0:
+                player_number += 1
+                continue
+            half = crop.shape[1] // 2
+            right_half = crop[:, half:crop.shape[1]]
+            ocr_text_list = []
+            for _ in range(10):
+                threshold = np.random.randint(140, 200)
+                blur_ksize = np.random.choice([3, 5, 7])
+                contrast = np.random.uniform(0.8, 1.5)
+                resize_ratio = np.random.uniform(0.8, 1.3)
+                preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
+                ocr_text_list = extract_score_with_easyocr(preprocessed_right)
+                if len(ocr_text_list) >= 5:
+                    break
+            if len(ocr_text_list) < 5:
+                all_player_scores_simple.append({
+                    'player': player_number,
+                    'error': 'スコア認識に失敗',
+                    'ocr_result': ocr_text_list
+                })
+                summary_lines_simple.append(f"Player_{player_number}: 状態=スコア認識に失敗 (simple) ")
+            else:
+                try:
+                    perfect_val = int(ocr_text_list[0])
+                    great_val   = int(ocr_text_list[1])
+                    good_val    = int(ocr_text_list[2])
+                    bad_val     = int(ocr_text_list[3])
+                    miss_val    = int(ocr_text_list[4])
+                    score_raw = (
+                        perfect_val * 3 +
+                        great_val * 2 +
+                        good_val * 1 +
+                        bad_val * 0 +
+                        miss_val * 0
+                    )
+                    score = math.floor(score_raw)
+                    all_player_scores_simple.append({
+                        'player': player_number,
+                        'perfect': perfect_val,
+                        'great': great_val,
+                        'good': good_val,
+                        'bad': bad_val,
+                        'miss': miss_val,
+                        'score': score
+                    })
+                    summary_lines_simple.append(f"Player_{player_number}: 状態=正常 (simple) \n-# PERFECT={perfect_val}, GREAT={great_val}, GOOD={good_val}, BAD={bad_val}, MISS={miss_val}, スコア={score}")
+                except Exception as e:
+                    all_player_scores_simple.append({
+                        'player': player_number,
+                        'error': f'数値変換に失敗 (simple): {e}',
+                        'ocr_result': ocr_text_list
+                    })
+                    summary_lines_simple.append(f"Player_{player_number}: 状態=数値変換に失敗 (simple)")
+            player_number += 1
+        response['results'] = all_player_scores_simple
+        # ラベル画像返却（認識できた場合のみ）
+        if debug and len(all_player_scores_simple) > 0 and 'error' not in all_player_scores_simple[0]:
+            labeled_image = draw_labels(img, all_perfect_positions, all_miss_positions)
+            _, encoded_img = cv2.imencode('.png', labeled_image)
+            img_bytes = encoded_img.tobytes()
+            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+            response['debug_image_base64'] = img_b64
+            response['debug_summary'] = '\n'.join(summary_lines_simple)
+        elif debug:
+            if 'debug_image_base64' in response:
+                del response['debug_image_base64']
+    if debug and len(response.get('results', [])) > 0 and 'note' not in response['results'][0]:
+        # 通常処理で認識できた場合のみラベル画像を返す
         labeled_image = draw_labels(img, all_perfect_positions, all_miss_positions)
         _, encoded_img = cv2.imencode('.png', labeled_image)
         img_bytes = encoded_img.tobytes()
         img_b64 = base64.b64encode(img_bytes).decode('utf-8')
         response['debug_image_base64'] = img_b64
         response['debug_summary'] = '\n'.join(summary_lines)
+    elif debug and len(response.get('results', [])) > 0 and response['results'][0].get('note') == 'simple preprocess fallback':
+        # シンプル下処理で認識できた場合は上記で枠線画像を返す（summaryは空）
+        response['debug_summary'] = 'simple preprocess fallback'
     return jsonify(response)
 
 if __name__ == '__main__':

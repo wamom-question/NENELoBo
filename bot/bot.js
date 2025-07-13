@@ -300,7 +300,7 @@ client.on('interactionCreate', async interaction => {
         .addOptions([
           { label: 'わかった', value: 'wakatta', emoji: '<:wakatta:1389786764696223756>' },
           { label: '済', value: 'henshin_sumi', emoji: '<:henshin_sumi:1389904864347291668>' },
-          { label: '感謝', value: 'henshin_kansya', emoji: '<:henshin_kansya:1389905209634984086>' }
+          { label: '感謝', value: 'henshin_kansya', emoji: '<:henshin_kansya:1389905209634984086>' },
           { label: 'OK', value: 'henshin_ok', emoji: '<:henshin_ok:1389905534768906280>' }
         ]);
       const row = new ActionRowBuilder().addComponents(selectMenu);
