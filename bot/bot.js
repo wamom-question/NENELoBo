@@ -450,9 +450,6 @@ client.on('messageCreate', async (message) => {
             const imageBuffer = Buffer.from(result.debug_image_base64, 'base64');
             await message.channel.send({ content: '（デバッグ用）読み取り部分にラベルをつけた画像です:', files: [{ attachment: imageBuffer, name: 'labeled_result.png' }] });
           }
-          if (isDebug && result.debug_summary) {
-            await message.channel.send(`${message.author.toString()} の認識結果:\n${result.debug_summary}`);
-          }
           // 各プレイヤーのデバッグ画像・パラメータも送信
           if (isDebug && result.results && Array.isArray(result.results)) {
             for (const player of result.results) {
