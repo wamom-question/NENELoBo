@@ -36,7 +36,7 @@ def convert_numpy(obj):
 def warmup_loop():
     while True:
         now = datetime.now(timezone(timedelta(hours=9)))
-        if now.minute % 10 == 0 and now.second == 0:
+        if now.minute % 5 == 0 and now.second == 0:
             warmup_and_check_all_images()
             time.sleep(1)  # 秒ずれ防止
         time.sleep(0.5)
@@ -66,6 +66,7 @@ def warmup_and_check_all_images():
     logging.info(f"[Warmup] 開始 {now} / 処理数: {len(png_files)}")
 
     success_params = []
+    label_regions = []
     mistake_count = 0
 
     for img_path in png_files:
@@ -109,8 +110,6 @@ def warmup_and_check_all_images():
             all_miss_positions.extend(miss_positions)
             processed_img = blackout_positions(processed_img, perfect_positions)
             processed_img = blackout_positions(processed_img, miss_positions)
-
-        label_regions = []
         for perfect_pos, miss_pos in zip(all_perfect_positions, all_miss_positions):
             x_perfect, y_perfect, _, _ = perfect_pos
             _, y_miss, _, h_miss = miss_pos
@@ -121,57 +120,71 @@ def warmup_and_check_all_images():
             y_label = max(0, y_perfect - int(base_length * 0.1))
             label_regions.append((x_label, y_label, square_width, square_height))
         label_regions.sort(key=lambda r: r[0])
-
         for region in label_regions:
             x, y, w_, h_ = region
             crop = img[y:y+h_, x:x+w_]
             if crop.size == 0:
                 continue
             right_half = crop[:, crop.shape[1]//2:]
-            # ε-greedy strategy for parameter selection
-            if os.path.exists(param_log_path):
-                try:
-                    with open(param_log_path, 'r', encoding='utf-8') as f:
-                        saved_params = json.load(f)
-                except json.JSONDecodeError:
-                    saved_params = []
-            else:
-                saved_params = []
 
-            if saved_params and np.random.rand() < 0.8:
-                chosen = random.choice(saved_params)
-                threshold = int(chosen['threshold'])
-                blur_ksize = int(chosen['blur'])
-                contrast = float(chosen['contrast'])
-                resize_ratio = float(chosen['resize_ratio'])
-            else:
-                threshold = np.random.randint(140, 200)
-                blur_ksize = np.random.choice([3, 5, 7])
-                contrast = np.random.uniform(0.8, 1.5)
-                resize_ratio = np.random.uniform(0.8, 1.3)
-            preprocessed = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
-            ocr_result = extract_score_with_easyocr(preprocessed)
-            if len(ocr_result) >= 5:
-                try:
-                    ocr_nums = list(map(int, ocr_result[:5]))
-                    if ocr_nums == expected:
-                        success_params.append({
-                            "image": fname,
-                            "threshold": threshold,
-                            "blur": blur_ksize,
-                            "contrast": round(contrast, 3),
-                            "resize_ratio": round(resize_ratio, 3)
-                        })
-                    else:
-                        logging.warning(f"[Warmup] MISMATCH: {fname} → OCR={ocr_nums} / Expected={expected}")
-                        mistake_count += 1
-                except Exception as e:
-                    logging.warning(f"[Warmup] 数値変換失敗: {fname} → {ocr_result} → {e}")
-                    mistake_count += 1
-            else:
-                logging.warning(f"[Warmup] スコア検出失敗: {fname} → {ocr_result}")
-            if len(ocr_result) < 5 or (len(ocr_result) >= 5 and ocr_nums != expected):
+                    # ループを1回だけにする & break不要に
+        success = False
+
+        # パラメータの読み込み（既存再利用 or ランダム生成）
+        if os.path.exists(param_log_path):
+            try:
+                with open(param_log_path, 'r', encoding='utf-8') as f:
+                    saved_params = json.load(f)
+            except json.JSONDecodeError:
+                saved_params = []
+        else:
+            saved_params = []
+
+        if saved_params and np.random.rand() < 0.8:
+            chosen = random.choice(saved_params)
+            threshold = int(chosen['threshold'])
+            blur_ksize = int(chosen['blur'])
+            contrast = float(chosen['contrast'])
+            resize_ratio = float(chosen['resize_ratio'])
+            gaussian_blur_ksize = int(chosen.get('gaussian_blur', 0))
+            use_clahe = bool(chosen.get('use_clahe', False))
+        else:
+            threshold = np.random.randint(100, 220)
+            blur_ksize = np.random.choice([1, 3, 5, 7, 9])
+            contrast = np.random.uniform(0.6, 2.0)
+            resize_ratio = np.random.uniform(0.6, 1.6)
+            gaussian_blur_ksize = np.random.choice([0, 1, 3, 5, 7, 9])
+            use_clahe = np.random.rand() < 0.5
+
+        # OCR処理
+        preprocessed = preprocess_image_for_ocr(
+            right_half, threshold, blur_ksize, contrast, resize_ratio,
+            gaussian_blur_ksize=gaussian_blur_ksize, use_clahe=use_clahe
+        )
+        ocr_result = extract_score_with_easyocr(preprocessed)
+
+        # 結果確認
+        if len(ocr_result) >= 5:
+            try:
+                ocr_nums = list(map(int, ocr_result[:5]))
+                if ocr_nums == expected:
+                    success_params.append({
+                        "image": fname,
+                        "threshold": threshold,
+                        "blur": blur_ksize,
+                        "contrast": round(contrast, 3),
+                        "resize_ratio": round(resize_ratio, 3),
+                        "gaussian_blur": gaussian_blur_ksize,
+                        "use_clahe": use_clahe
+                    })
+                    success = True
+            except Exception as e:
+                logging.warning(f"[Warmup] 数値変換失敗: {fname} → {ocr_result} → {e}")
                 mistake_count += 1
+
+        if not success:
+            logging.warning(f"[Warmup] MISMATCH or スコア検出失敗: {fname} → {ocr_result} / Expected={expected}")
+            mistake_count += 1
 
     if mistake_count > 0:
         logging.warning(f"[Warmup] 誤認識数: {mistake_count}件")
@@ -203,11 +216,10 @@ def warmup_and_check_all_images():
                 if os.path.exists(csv_path):
                     os.remove(csv_path)
                 with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=['image', 'threshold', 'blur', 'contrast', 'resize_ratio'])
+                    writer = csv.DictWriter(csvfile, fieldnames=['image', 'threshold', 'blur', 'contrast', 'resize_ratio','use_clahe', 'gaussian_blur'])
                     writer.writeheader()
                     for row in old_data:
                         writer.writerow(row)
-                logging.info(f"[Warmup] CSVも保存しました: {csv_path}")
             except Exception as e:
                 logging.warning(f"[Warmup] CSV保存失敗: {e}")
             # --- End CSV export ---
@@ -215,7 +227,7 @@ def warmup_and_check_all_images():
             logging.warning(f"[Warmup] パラメータ保存失敗: {e}")
 
 
-def preprocess_image_for_ocr(image, threshold=180, blur_ksize=5, contrast=1.0, resize_ratio=1.0):
+def preprocess_image_for_ocr(image, threshold=180, blur_ksize=5, contrast=1.0, resize_ratio=1.0,gaussian_blur_ksize=0, use_clahe=False):
     img = image.copy()
     if resize_ratio != 1.0:
         img = cv2.resize(img, None, fx=resize_ratio, fy=resize_ratio, interpolation=cv2.INTER_LINEAR)
@@ -308,6 +320,8 @@ def draw_labels(image, perfect_positions, miss_positions, labels=None):
 
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
+    label_regions = []
+    param_log_path = '/app/data/warmup_success_params.json'
     if 'image' not in request.files:
         return jsonify({'error': 'No image uploaded'}), 400
     file = request.files['image']
@@ -343,7 +357,6 @@ def ocr_endpoint():
         all_miss_positions.extend(miss_positions)
         processed_img = blackout_positions(processed_img, perfect_positions)
         processed_img = blackout_positions(processed_img, miss_positions)
-    label_regions = []
     for perfect_pos, miss_pos in zip(all_perfect_positions, all_miss_positions):
         x_perfect, y_perfect, _, _ = perfect_pos
         _, y_miss, _, h_miss = miss_pos
@@ -370,23 +383,49 @@ def ocr_endpoint():
         debug_pre_b64 = None
         debug_params = None
         player_debug = {}  # debug用の初期化
+        # 成功パラメータの読み込み（このブロックをループ前に置く）
+        try:
+            with open(param_log_path, 'r', encoding='utf-8') as f:
+                saved_params = json.load(f)
+            if not saved_params:
+                raise ValueError("パラメータが空です")
+        except Exception as e:
+            logging.warning(f"[Retry-OCR] 成功パラメータ読み込み失敗: {e}")
+            saved_params = []
+
+        # 再利用だけで試行（保存はしない）
         for _ in range(10):
-            threshold = np.random.randint(140, 200)
-            blur_ksize = np.random.choice([3, 5, 7])
-            contrast = np.random.uniform(0.8, 1.5)
-            resize_ratio = np.random.uniform(0.8, 1.3)
-            preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
+            chosen = random.choice(saved_params)
+            threshold = int(chosen['threshold'])
+            blur_ksize = int(chosen['blur'])
+            contrast = float(chosen['contrast'])
+            resize_ratio = float(chosen['resize_ratio'])
+            gaussian_blur_ksize = int(chosen.get('gaussian_blur', 0))
+            use_clahe = bool(chosen.get('use_clahe', False))
+
+            preprocessed_right = preprocess_image_for_ocr(
+                right_half,
+                threshold,
+                blur_ksize,
+                contrast,
+                resize_ratio,
+                gaussian_blur_ksize=gaussian_blur_ksize,
+                use_clahe=use_clahe
+            )
             ocr_text_list = extract_score_with_easyocr(preprocessed_right)
+
             if debug and debug_crop_b64 is None:
                 _, crop_buf = cv2.imencode('.png', right_half)
                 debug_crop_b64 = base64.b64encode(crop_buf.tobytes()).decode('utf-8')
                 _, pre_buf = cv2.imencode('.png', preprocessed_right)
                 debug_pre_b64 = base64.b64encode(pre_buf.tobytes()).decode('utf-8')
                 debug_params = {
-                    'threshold': int(threshold),
-                    'blur_ksize': int(blur_ksize),
-                    'contrast': float(contrast),
-                    'resize_ratio': float(resize_ratio)
+                    'threshold': threshold,
+                    'blur_ksize': blur_ksize,
+                    'contrast': round(contrast, 3),
+                    'resize_ratio': round(resize_ratio, 3),
+                    'gaussian_blur': gaussian_blur_ksize,
+                    'use_clahe': use_clahe
                 }
             if len(ocr_text_list) >= 5:
                 break
@@ -402,7 +441,6 @@ def ocr_endpoint():
                 'ocr_result': ocr_text_list,
                 **player_debug
             })
-            summary_lines.append(f"Player_{player_number}: 状態=スコア認識に失敗")
         else:
             try:
                 perfect_val = int(ocr_text_list[0])
@@ -413,13 +451,37 @@ def ocr_endpoint():
                 # PERFECTが0の場合やGREATがPERFECTの1.5倍以上の場合は再度OCRを試みる
                 if perfect_val == 0 or (perfect_val > 0 and great_val >= perfect_val * 1.5):
                     retry_ocr = False
+                    # 事前に成功パラメータを読み込んでおく
+                    try:
+                        with open(param_log_path, 'r', encoding='utf-8') as f:
+                            saved_params = json.load(f)
+                        if not saved_params:
+                            raise ValueError("成功パラメータが空です")
+                    except Exception as e:
+                        logging.warning(f"[Retry-OCR] 成功パラメータ読み込み失敗: {e}")
+                        saved_params = []
+
+                    # パラメータを100%再利用（保存なし）
                     for _ in range(5):
-                        threshold = np.random.randint(140, 200)
-                        blur_ksize = np.random.choice([3, 5, 7])
-                        contrast = np.random.uniform(0.8, 1.5)
-                        resize_ratio = np.random.uniform(0.8, 1.3)
-                        preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
+                        chosen = random.choice(saved_params)
+                        threshold = int(chosen['threshold'])
+                        blur_ksize = int(chosen['blur'])
+                        contrast = float(chosen['contrast'])
+                        resize_ratio = float(chosen['resize_ratio'])
+                        gaussian_blur_ksize = int(chosen.get('gaussian_blur', 0))
+                        use_clahe = bool(chosen.get('use_clahe', False))
+
+                        preprocessed_right = preprocess_image_for_ocr(
+                            right_half,
+                            threshold,
+                            blur_ksize,
+                            contrast,
+                            resize_ratio,
+                            gaussian_blur_ksize=gaussian_blur_ksize,
+                            use_clahe=use_clahe
+                        )
                         retry_ocr_text_list = extract_score_with_easyocr(preprocessed_right)
+
                         if len(retry_ocr_text_list) >= 5:
                             try:
                                 retry_perfect = int(retry_ocr_text_list[0])
@@ -475,171 +537,7 @@ def ocr_endpoint():
         player_number += 1
 
     response = {'results': all_player_scores}
-    if len(all_player_scores) == 0:
-        logging.error('[OCR API] resultsが空配列です。画像内容や検出ロジックを確認してください。')
-        # シンプルな前処理画像で通常の読み取りロジックを再実行
-        simple_img = preprocess_image_for_ocr_simple(img)
-        if debug:
-            _, simple_buf = cv2.imencode('.png', simple_img)
-            simple_b64 = base64.b64encode(simple_buf.tobytes()).decode('utf-8')
-            response['simple_preprocess_image_base64'] = simple_b64
-        # ここから通常の流れ
-        processed_img = simple_img.copy()
-        all_perfect_positions, all_miss_positions = [], []
-        for _ in range(5):
-            perfect_positions, miss_positions = extract_perfect_miss_positions(processed_img)
-            if not perfect_positions or not miss_positions:
-                break
-            all_perfect_positions.extend(perfect_positions)
-            all_miss_positions.extend(miss_positions)
-            processed_img = blackout_positions(processed_img, perfect_positions)
-            processed_img = blackout_positions(processed_img, miss_positions)
-        label_regions = []
-        for perfect_pos, miss_pos in zip(all_perfect_positions, all_miss_positions):
-            x_perfect, y_perfect, _, _ = perfect_pos
-            _, y_miss, _, h_miss = miss_pos
-            base_length = (y_miss + h_miss) - y_perfect
-            square_width = int(base_length * 1.3)
-            square_height = int(base_length * 1.2)
-            x_label = max(0, x_perfect - int(base_length * 0.1))
-            y_label = max(0, y_perfect - int(base_length * 0.1))
-            label_regions.append((x_label, y_label, square_width, square_height))
-        label_regions.sort(key=lambda r: r[0])
-        all_player_scores_simple = []
-        player_number = 1
-        summary_lines_simple = []
-        for region in label_regions:
-            x_label, y_label, square_width, square_height = region
-            crop = img[y_label:y_label+square_height, x_label:x_label+square_width]
-            if crop.size == 0:
-                player_number += 1
-                continue
-            half = crop.shape[1] // 2
-            right_half = crop[:, half:crop.shape[1]]
-            ocr_text_list = []
-            for _ in range(10):
-                param_log_path = '/app/data/warmup_success_params.json'
-                if os.path.exists(param_log_path):
-                    try:
-                        with open(param_log_path, 'r', encoding='utf-8') as f:
-                            saved_params = json.load(f)
-                    except json.JSONDecodeError:
-                        saved_params = []
-                else:
-                    saved_params = []
-
-                if saved_params and np.random.rand() < 0.8:
-                    chosen = random.choice(saved_params)
-                    threshold = int(chosen['threshold'])
-                    blur_ksize = int(chosen['blur'])
-                    contrast = float(chosen['contrast'])
-                    resize_ratio = float(chosen['resize_ratio'])
-                else:
-                    threshold = np.random.randint(140, 200)
-                    blur_ksize = np.random.choice([3, 5, 7])
-                    contrast = np.random.uniform(0.8, 1.5)
-                    resize_ratio = np.random.uniform(0.8, 1.3)
-                preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
-                ocr_text_list = extract_score_with_easyocr(preprocessed_right)
-                if len(ocr_text_list) >= 5:
-                    break
-            # ---ここから再OCRロジック---
-            retry_ocr = False
-            if len(ocr_text_list) >= 5:
-                try:
-                    perfect_val = int(ocr_text_list[0])
-                    great_val   = int(ocr_text_list[1])
-                    # 再OCR条件
-                    if perfect_val == 0 or (perfect_val > 0 and great_val >= perfect_val * 1.5):
-                        max_attempts = 30 if debug else 5
-                        for _ in range(max_attempts):
-                            threshold = np.random.randint(140, 200)
-                            blur_ksize = np.random.choice([3, 5, 7])
-                            contrast = np.random.uniform(0.8, 1.5)
-                            resize_ratio = np.random.uniform(0.8, 1.3)
-                            preprocessed_right = preprocess_image_for_ocr(right_half, threshold, blur_ksize, contrast, resize_ratio)
-                            retry_ocr_text_list = extract_score_with_easyocr(preprocessed_right)
-                            if len(retry_ocr_text_list) >= 5:
-                                try:
-                                    retry_perfect = int(retry_ocr_text_list[0])
-                                    retry_great   = int(retry_ocr_text_list[1])
-                                    if retry_perfect != 0 and not (retry_perfect > 0 and retry_great >= retry_perfect * 1.5):
-                                        perfect_val = retry_perfect
-                                        great_val   = retry_great
-                                        good_val    = int(retry_ocr_text_list[2])
-                                        bad_val     = int(retry_ocr_text_list[3])
-                                        miss_val    = int(retry_ocr_text_list[4])
-                                        ocr_text_list = retry_ocr_text_list
-                                        retry_ocr = True
-                                        logging.info(f'[Retry-OCR] 成功 threshold={threshold}, blur={blur_ksize}, contrast={contrast:.2f}, resize={resize_ratio:.2f}')
-                                        break
-                                except Exception:
-                                    continue
-                    # ---再OCR後の判定---
-                    if perfect_val == 0 or (perfect_val > 0 and great_val >= perfect_val * 1.5):
-                        all_player_scores_simple.append({
-                            'player': player_number,
-                            'error': 'PERFECTが0またはGREATがPERFECTの1.5倍以上のままです',
-                            'ocr_result': ocr_text_list
-                        })
-                        summary_lines_simple.append(f"Player_{player_number}: 状態=PERFECTが0またはGREATがPERFECTの1.5倍以上のままです (simple)")
-                        player_number += 1
-                        continue
-                    # ---通常のスコア計算---
-                    good_val    = int(ocr_text_list[2])
-                    bad_val     = int(ocr_text_list[3])
-                    miss_val    = int(ocr_text_list[4])
-                    score_raw = (
-                        perfect_val * 3 +
-                        great_val * 2 +
-                        good_val * 1 +
-                        bad_val * 0 +
-                        miss_val * 0
-                    )
-                    score = math.floor(score_raw)
-                    all_player_scores_simple.append({
-                        'player': player_number,
-                        'perfect': perfect_val,
-                        'great': great_val,
-                        'good': good_val,
-                        'bad': bad_val,
-                        'miss': miss_val,
-                        'score': score
-                    })
-                    summary_lines_simple.append(f"Player_{player_number}: 状態=正常 (simple) \n-# PERFECT={perfect_val}, GREAT={great_val}, GOOD={good_val}, BAD={bad_val}, MISS={miss_val}, スコア={score}")
-                except Exception as e:
-                    all_player_scores_simple.append({
-                        'player': player_number,
-                        'error': f'数値変換に失敗 (simple): {e}',
-                        'ocr_result': ocr_text_list
-                    })
-                    summary_lines_simple.append(f"Player_{player_number}: 状態=数値変換に失敗 (simple)")
-            else:
-                all_player_scores_simple.append({
-                    'player': player_number,
-                    'error': 'スコア認識に失敗',
-                    'ocr_result': ocr_text_list
-                })
-                summary_lines_simple.append(f"Player_{player_number}: 状態=スコア認識に失敗 (simple) ")
-            player_number += 1
-        response['results'] = all_player_scores_simple
-        # ラベル画像返却（認識できた場合のみ）
-        if debug and len(all_player_scores_simple) > 0 and 'error' not in all_player_scores_simple[0]:
-            labeled_image = draw_labels(
-                img,
-                all_perfect_positions,
-                all_miss_positions,
-                labels=[f"Player_{i+1}" for i in range(len(label_regions))]
-            )
-            _, encoded_img = cv2.imencode('.png', labeled_image)
-            img_bytes = encoded_img.tobytes()
-            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-            response['debug_image_base64'] = img_b64
-            response['debug_summary'] = '\n'.join(summary_lines_simple)
-        elif debug:
-            if 'debug_image_base64' in response:
-                del response['debug_image_base64']
-    if debug and len(response.get('results', [])) > 0 and 'note' not in response['results'][0]:
+    if debug and len(response.get('results', [])) > 0:
         # 通常処理で認識できた場合のみラベル画像を返す
         labeled_image = draw_labels(
             img,

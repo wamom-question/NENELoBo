@@ -548,7 +548,7 @@ client.on('messageCreate', async (message) => {
             console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
         } catch (err) {
-          await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
+          await message.reply('OCRが起動していない可能性があります。しばらくしてから再度お試しください。');
           console.error(err);
         }
       }

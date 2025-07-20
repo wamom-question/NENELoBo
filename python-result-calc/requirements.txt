@@ -3,4 +3,4 @@ discord.py
 opencv-python-headless
 easyocr
 pytesseract
-numpy
+numpy<2
