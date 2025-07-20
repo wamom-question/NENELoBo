@@ -457,9 +457,17 @@ client.on('messageCreate', async (message) => {
                 const cropBuf = Buffer.from(player.crop_image_base64, 'base64');
                 await message.channel.send({ content: `Player_${player.player} 切り抜き画像`, files: [{ attachment: cropBuf, name: `player${player.player}_crop.png` }] });
               }
-              if (player.preprocessed_image_base64) {
-                const preBuf = Buffer.from(player.preprocessed_image_base64, 'base64');
-                await message.channel.send({ content: `Player_${player.player} 前処理後画像`, files: [{ attachment: preBuf, name: `player${player.player}_preprocessed.png` }] });
+              // Prefer simple_preprocess_image_base64 if present, fall back to preprocessed_image_base64
+              if (player.simple_preprocess_image_base64 || player.preprocessed_image_base64) {
+                const preBuf = Buffer.from(
+                  player.simple_preprocess_image_base64 || player.preprocessed_image_base64,
+                  'base64'
+                );
+                const preLabel = player.simple_preprocess_image_base64 ? '簡易前処理画像' : '前処理後画像';
+                await message.channel.send({
+                  content: `Player_${player.player} ${preLabel}`,
+                  files: [{ attachment: preBuf, name: `player${player.player}_preprocessed.png` }]
+                });
               }
               if (player.preprocess_params) {
                 await message.channel.send({ content: `Player_${player.player} 前処理パラメータ: \n${JSON.stringify(player.preprocess_params, null, 2)}` });
