@@ -5,7 +5,7 @@ import struct
 import pandas as pd
 
 DB_PATH = "data/warmup_success_params.sqlite"
-conn = sqlite3.connect(DB_PATH)
+# Removed unused global database connection to prevent resource leaks
 
 def decode_sqlite_int(val):
     if isinstance(val, bytes):
@@ -53,8 +53,9 @@ st.subheader("成功率 vs 試行数（散布図）")
 st.scatter_chart(df[["total_count", "success_rate"]])
 
 st.subheader("ヒストグラム")
-param = st.selectbox("パラメータを選択", [col for col in df.columns[:-3] if col != "id"])
-st.bar_chart(df[param].value_counts().sort_index().drop(labels=["id"], errors="ignore"))
+param_options = [col for col in df.columns[:-3] if col != "id"]
+param = st.selectbox("パラメータを選択", param_options)
+st.bar_chart(df[param].value_counts().sort_index())
 
 st.subheader("成功率上位パラメータ")
 st.dataframe(df.sort_values("success_rate", ascending=False).head(10), use_container_width=True)

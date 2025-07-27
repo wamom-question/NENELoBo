@@ -253,7 +253,9 @@ def warmup_and_check_all_images():
             for row in rows:
                 _, th, bl, ct_scaled, rs_scaled, gb, uc, success_count, total_count = row
                 success_count = success_count or 0
-                total_count = total_count or 1
+                # Skip UCB calculation if total_count is 0 to avoid division by zero
+                if not total_count or total_count == 0:
+                    continue
                 average = success_count / total_count
                 ucb_score = average + 1.0 / (1 + total_count) + math.sqrt(2 * math.log(total_trials) / total_count)
                 if ucb_score > best_score:
