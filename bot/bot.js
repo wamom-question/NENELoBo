@@ -6,7 +6,6 @@ import fetch from 'node-fetch';
 import fs from 'fs';
 import { setupBumpNoticeHandler, handleNextBumpCommand, setupNextBumpOnStartup } from './BumpNotice.js';
 import { performSimpleGachaDraw, performGacha100, performGacha10, calculateCombinationProbability } from './gacha.js';
-import { Blob } from 'buffer';
 import FormData from 'form-data';
 
 // 環境変数から設定を読み込む
@@ -16,6 +15,8 @@ const channelId = process.env.ANNOUNCEMENT_CHANNEL_ID;  // お知らせを送る
 const guildId = process.env.GUILD_ID; // テスト用のギルドID
 const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python_announce_fetcher:5000/announcements'; // PythonのAPIエンドポイント
 const ocrAlwaysChannelId = process.env.OCR_ALWAYS_CHANNEL_ID; // OCRを常に実行するチャンネルID
+const priorityQueue = [];
+const normalQueue = [];
 
 // OCR APIエンドポイント
 const OCR_API_URL = 'http://python_result_calc:5000/ocr';
@@ -33,7 +34,7 @@ const client = new Client({
 const commands = [
   new SlashCommandBuilder()
     .setName('nenelobo')
-    .setDescription('BotのPingを返します。')
+    .setDescription('Botの情報を返します。')
     .toJSON(),
   new SlashCommandBuilder()
     .setName('gacha')
@@ -155,22 +156,25 @@ async function handleAnnouncementText(text) {
     const utcStart = new Date(jstStart.getTime() - 9 * 60 * 60 * 1000);
     const utcEnd = new Date(utcStart.getTime() + 2 * 60 * 60 * 1000);
 
-    const guild = await client.guilds.fetch(guildId);
-    const event = await guild.scheduledEvents.create({
-      name: `プロセカ放送局#${number}`,
-      scheduledStartTime: utcStart,
-      scheduledEndTime: utcEnd,
-      privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-      entityType: GuildScheduledEventEntityType.Voice,
-      channel: '1248602145133953046',
-      description: '「プロセカ放送局」の生配信イベントです。',
-    });
+    // Only create the event if the current server's ID matches the allowed guildId
+    if (guildId && client.guilds.cache.has(guildId)) {
+      const guild = await client.guilds.fetch(guildId);
+      const event = await guild.scheduledEvents.create({
+        name: `プロセカ放送局#${number}`,
+        scheduledStartTime: utcStart,
+        scheduledEndTime: utcEnd,
+        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+        entityType: GuildScheduledEventEntityType.Voice,
+        channel: '1248602145133953046',
+        description: '「プロセカ放送局」の生配信イベントです。',
+      });
 
-    if (channel) {
-      channel.send(`📢 Discordイベントを作成しました！\n${event.url}`);
+      if (channel) {
+        channel.send(`📢 Discordイベントを作成しました！\n${event.url}`);
+      }
+
+      console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
     }
-
-    console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
   }
 }
 
@@ -178,10 +182,30 @@ async function handleAnnouncementText(text) {
 client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
   if (interaction.isChatInputCommand()) {
-    if (interaction.commandName === 'nenelobo') {
-      const ping = client.ws.ping;
-      await interaction.reply(`BotのPingは${ping}msです！`);
-    } else if (interaction.commandName === 'gacha') {
+  if (interaction.commandName === 'nenelobo') {
+    const ping = client.ws.ping;
+
+    // 外部テキストファイルを読み込む
+    let rawText;
+    try {
+      rawText = await fs.readFile('/app/data/ping_message.txt', 'utf-8');
+    } catch (err) {
+      console.error('ping_message.txt の読み込みに失敗:', err);
+      rawText = 'BotのPingは${ping}msです！'; // fallback
+    }
+
+    // テキスト内の ${ping} を置換
+    const replacedText = rawText.replace(/\$\{ping\}/g, `${ping}`);
+
+    // Embedメッセージとして送信
+    const embed = new EmbedBuilder()
+      .setColor('Blue')
+      .setTitle('📶 Ping 結果')
+      .setDescription(replacedText)
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+  } else if (interaction.commandName === 'gacha') {
       const pulls = interaction.options.getInteger('pulls');
 
       if (pulls === 100) {
@@ -288,59 +312,8 @@ client.on('interactionCreate', async interaction => {
           await interaction.followUp(summary.join('\n'));
         }
       }
-    }
-  } else if (interaction.isMessageContextMenuCommand && interaction.isMessageContextMenuCommand()) {
-    // メッセージコンテキストメニューコマンド
-    if (interaction.commandName === 'リアクション') {
-      // セレクトメニューを表示
-      const { ActionRowBuilder, StringSelectMenuBuilder } = await import('discord.js');
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('reaction_select')
-        .setPlaceholder('リアクションを選択してください')
-        .addOptions([
-          { label: 'わかった', value: 'wakatta', emoji: '<:wakatta:1389786764696223756>' },
-          { label: '済', value: 'henshin_sumi', emoji: '<:henshin_sumi:1389904864347291668>' },
-          { label: '感謝', value: 'henshin_kansya', emoji: '<:henshin_kansya:1389905209634984086>' },
-          { label: 'OK', value: 'henshin_ok', emoji: '<:henshin_ok:1389905534768906280>' }
-        ]);
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-      await interaction.reply({ content: 'リアクションを選択してください', components: [row], ephemeral: true });
-    }
-  } else if (interaction.isStringSelectMenu && interaction.customId === 'reaction_select') {
-    // セレクトメニューの選択肢に応じてリアクション
-    try {
-      const message = await interaction.channel.messages.fetch(interaction.message.interaction.targetId);
-      let emoji;
-      switch (interaction.values[0]) {
-        case 'wakatta':
-          emoji = '<:wakatta:1389786764696223756>';
-          break;
-        case 'thumbsup':
-          emoji = 'henshin_sumi';
-          break;
-        case 'henshin_kansya':
-          emoji = '<:henshin_kansya:1389905209634984086>';
-          break;
-        case 'henshin_ok':
-          emoji = '<:henshin_ok:1389905534768906280>';
-          break;
-        default:
-          emoji = null;
-      }
-      if (emoji) {
-        await message.react(emoji);
-        await interaction.update({ content: 'リアクションしました！', components: [] });
-      } else {
-        await interaction.update({ content: 'リアクションに失敗しました。', components: [] });
-      }
-    } catch (err) {
-      await interaction.update({ content: 'リアクションに失敗しました。', components: [] });
-      console.error(err);
-    }
-  } else if (interaction.commandName === 'nextbump') {
-    await handleNextBumpCommand(interaction, client);
   }
-});
+}});
 
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
@@ -350,7 +323,6 @@ client.on('messageCreate', async (message) => {
     for (const attachment of message.attachments.values()) {
       if (attachment.contentType && attachment.contentType.startsWith('image')) {
         try {
-          // node-fetch v3以降推奨: response.arrayBuffer() でbuffer取得
           const response = await fetch(attachment.url);
           const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
@@ -486,7 +458,8 @@ client.on('messageCreate', async (message) => {
 // ocrAlwaysChannelId で画像付きメッセージが送信された場合にOCR APIへ送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (message.channel.id === ocrAlwaysChannelId && message.attachments.size > 0) {
+
+  if (ocrAlwaysChannelId && message.channel.id === ocrAlwaysChannelId && message.attachments.size > 0) {
     for (const attachment of message.attachments.values()) {
       if (attachment.contentType && attachment.contentType.startsWith('image')) {
         try {
@@ -496,6 +469,7 @@ client.on('messageCreate', async (message) => {
 
           const form = new FormData();
           form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
+          form.append('debug', isDebug ? '1' : '0');
 
           const ocrRes = await fetch(OCR_API_URL, {
             method: 'POST',

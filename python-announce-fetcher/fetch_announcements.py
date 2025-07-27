@@ -9,7 +9,7 @@ LAST_CHECK_FILE = "last_check.txt"
 DATA_URL = "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/main/userInformations.json"
 
 # loggingの設定
-# logging.basicConfig(level=logging.INFO)  # ログレベルをINFOにして冗長なログを減らす
+logging.basicConfig(level=logging.ERROR)  # エラーログのみ出力
 
 # 前回のチェック時刻を取得
 def get_last_check_time():
@@ -31,7 +31,6 @@ def save_last_check_time(timestamp):
 def fetch_announcements():
     last_check = get_last_check_time()
     current_time = int(time.time())  # 現在のUNIX時刻
-    logging.info(f"Checking announcements from {last_check} to {current_time}")
 
     try:
         response = requests.get(DATA_URL)

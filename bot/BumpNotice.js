@@ -6,6 +6,9 @@ import fetch from 'node-fetch';
 import { EmbedBuilder, Events } from 'discord.js';
 import { calculateCombinationProbability } from './gacha.js';
 
+const BUMP_GACHA_COUNT_FILE = '/app/data/bumpGachaCount.json';
+const NEXT_BUMP_FILE = '/app/data/Nextbump.json';
+
 // スレッドIDの形式: 'チャンネルID/スレッドID' ではなく、スレッド自体のIDを記述（DiscordからスレッドIDを直接取得）
 const THREAD_MAP = {
   weekday: {
@@ -55,9 +58,6 @@ function createErrorEmbed(error, context = '不明') {
     .setDescription(`**状況**: ${context}\n**内容**:\n\`\`\`${error.message}\`\`\``)
     .setColor('Red');
 }
-
-const BUMP_GACHA_COUNT_FILE = '/app/data/bumpGachaCount.json';
-const NEXT_BUMP_FILE = '/app/data/Nextbump.json';
 
 // Helper function to read the JSON data from a file
 function readJsonFile(filePath) {
@@ -326,6 +326,8 @@ async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
 
 export function setupBumpNoticeHandler(client) {
   client.on(Events.MessageCreate, async (message) => {
+    const allowedGuildId = process.env.GUILD_ID;
+    if (allowedGuildId && message.guildId !== allowedGuildId) return;
     if (message.author.id === '302050872383242240') {
       console.log('📥 Disboard メッセージ検知:', message.embeds[0]?.description || '[内容なし]');
     }
