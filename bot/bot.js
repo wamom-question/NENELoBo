@@ -3,7 +3,7 @@ dotenv.config();  // .envファイルを読み込む
 
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel } from 'discord.js';
 import fetch from 'node-fetch';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import { setupBumpNoticeHandler, handleNextBumpCommand, setupNextBumpOnStartup } from './BumpNotice.js';
 import { performSimpleGachaDraw, performGacha100, performGacha10, calculateCombinationProbability } from './gacha.js';
 import FormData from 'form-data';
@@ -458,7 +458,6 @@ client.on('messageCreate', async (message) => {
 // ocrAlwaysChannelId で画像付きメッセージが送信された場合にOCR APIへ送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-
   if (ocrAlwaysChannelId && message.channel.id === ocrAlwaysChannelId && message.attachments.size > 0) {
     for (const attachment of message.attachments.values()) {
       if (attachment.contentType && attachment.contentType.startsWith('image')) {
@@ -466,7 +465,7 @@ client.on('messageCreate', async (message) => {
           const response = await fetch(attachment.url);
           const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
-
+          const isDebug = false; // or true
           const form = new FormData();
           form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
           form.append('debug', isDebug ? '1' : '0');
