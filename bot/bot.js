@@ -459,8 +459,67 @@ client.on('messageCreate', async (message) => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (ocrAlwaysChannelId && message.channel.id === ocrAlwaysChannelId && message.attachments.size > 0) {
-    for (const attachment of message.attachments.values()) {
-      if (attachment.contentType && attachment.contentType.startsWith('image')) {
+    const imageAttachments = [...message.attachments.values()].filter(att => att.contentType && att.contentType.startsWith('image'));
+    const isMultipleImages = imageAttachments.length >= 2;
+        if (isMultipleImages) {
+      const results = [];
+
+      for (const attachment of imageAttachments) {
+        try {
+          const response = await fetch(attachment.url);
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+
+          const form = new FormData();
+          form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
+
+          const ocrRes = await fetch(OCR_API_URL, {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders()
+          });
+
+          const result = await ocrRes.json();
+          results.push(result);
+        } catch (err) {
+          results.push({ error: 'API_ERROR' });
+        }
+      }
+
+      for (const result of results) {
+        if (result && result.results && result.results.length === 1) {
+          const player = result.results[0];
+          if (player.error) {
+            if (player.error.startsWith('数値変換に失敗')) {
+              await message.channel.send('<:ocr_error_convert:1389568868493561967>');
+            } else if (player.error === 'スコア認識に失敗') {
+              await message.channel.send('<:ocr_error_score:1389573918825775145>');
+            } else {
+              await message.channel.send('<:ocr_error:1389568660401684500>');
+            }
+          } else {
+            let reply = `-# 認識結果 ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`;
+            const replyMsg = await message.reply(reply);
+            const scoreStr = String(player.score);
+            await replyMsg.react('<:ocr_score:1389569033874968576>');
+            await new Promise(res => setTimeout(res, 500));
+            for (let i = 0; i < scoreStr.length; i++) {
+              const digit = scoreStr[i];
+              const pos = i + 1;
+              const emojiId = process.env[`EMOJI_${digit}_${pos}`];
+              if (emojiId) {
+                await replyMsg.react(emojiId);
+                await new Promise(res => setTimeout(res, 500));
+              }
+            }
+          }
+        } else {
+          await message.channel.send('<:ocr_error_api:1389800393332101311>');
+        }
+      }
+      return;
+    }
+    for (const attachment of imageAttachments) {
         try {
           const response = await fetch(attachment.url);
           const arrayBuffer = await response.arrayBuffer();
@@ -527,7 +586,7 @@ client.on('messageCreate', async (message) => {
       }
     }
   }
-});
+);
 
 // Botトークンでログイン
 client.login(token);
