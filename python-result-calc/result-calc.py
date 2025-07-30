@@ -18,7 +18,7 @@ from io import BytesIO
 from datetime import datetime, timedelta, timezone
 
 logging.basicConfig(
-    level=logging.WARN,
+    level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',)
 
 app = Flask(__name__)
@@ -120,7 +120,6 @@ def init_warmup_db(db_path='/app/data/warmup_success_params.sqlite'):
             ''')
             conn.commit()
     conn.close()
-    
 
 def decode_sqlite_int(val):
     if isinstance(val, bytes):
@@ -145,7 +144,7 @@ def get_random_prob(param_db_path='/app/data/warmup_success_params.sqlite'):
         return 1.0 - 0.9 * (count / max_count)
 
 def warmup_and_check_all_images():
-    logging.info("[Debug] warmup_and_check_all_images 開始")
+    logging.debug("warmup_and_check_all_images 開始")
     warmup_dir = '/app/data/warmup'
     param_db_path = '/app/data/warmup_success_params.sqlite'
     if not os.path.isdir(warmup_dir):
@@ -160,6 +159,10 @@ def warmup_and_check_all_images():
     if not png_files:
         logging.warning(f"[Warmup] ファイルが見つかりません: {warmup_dir}")
         return
+
+    # ランダムに10枚の画像を選択
+    np.random.shuffle(png_files)
+    png_files = png_files[:10]
 
     jst = timezone(timedelta(hours=9))
     now = datetime.now(jst).strftime('%Y-%m-%d %H:%M:%S')
@@ -237,24 +240,14 @@ def warmup_and_check_all_images():
         else:
             rows = []
 
-        random_prob = get_random_prob(param_db_path)
-        if np.random.rand() < random_prob or not rows:
-            threshold = np.random.randint(100, 220)
-            blur_ksize = np.random.choice([1, 3, 5, 7, 9])
-            contrast_scaled = np.random.uniform(0.6, 2.0)
-            resize_ratio = np.random.uniform(0.6, 1.6)
-            gaussian_blur_ksize = np.random.choice([0, 1, 3, 5, 7, 9])
-            use_clahe = np.random.rand() < 0.5
-            chosen_row = None
-        else:
+        chosen_row = None
+        use_ucb = np.random.rand() < 0.6 and rows  # 60%の確率でUCB、40%はランダム
+        if use_ucb:
             total_trials = sum(row[-1] for row in rows) or 1
             best_score = -float('inf')
-            chosen_row = None
             for row in rows:
                 _, th, bl, ct_scaled, rs_scaled, gb, uc, success_count, total_count = row
-                success_count = success_count or 0
-                # Skip UCB calculation if total_count is 0 to avoid division by zero
-                if not total_count or total_count == 0:
+                if total_count == 0:
                     continue
                 average = success_count / total_count
                 ucb_score = average + 1.0 / (1 + total_count) + math.sqrt(2 * math.log(total_trials) / total_count)
@@ -262,6 +255,7 @@ def warmup_and_check_all_images():
                     best_score = ucb_score
                     chosen_row = row
 
+        if chosen_row:
             _, th, bl, ct_scaled, rs_scaled, gb, uc, _, _ = chosen_row
             contrast_scaled = ct_scaled / 100
             resize_ratio = rs_scaled / 100
@@ -269,6 +263,13 @@ def warmup_and_check_all_images():
             blur_ksize = decode_sqlite_int(bl)
             gaussian_blur_ksize = decode_sqlite_int(gb)
             use_clahe = bool(decode_sqlite_int(uc))
+        else:
+            threshold = np.random.randint(100, 220)
+            blur_ksize = np.random.choice([1, 3, 5, 7, 9])
+            contrast_scaled = np.random.uniform(0.6, 2.0)
+            resize_ratio = np.random.uniform(0.6, 1.6)
+            gaussian_blur_ksize = np.random.choice([0, 1, 3, 5, 7, 9])
+            use_clahe = np.random.rand() < 0.5
 
         contrast = int(contrast_scaled * 100)
         resize_ratio_scaled = int(resize_ratio * 100)
@@ -312,17 +313,14 @@ def warmup_and_check_all_images():
                     except Exception as e:
                         logging.warning(f"[Warmup] SQLite成功統計保存失敗: {e}")
             except Exception as e:
-                logging.warning(f"[Warmup] 数値変換失敗: {fname} → {ocr_result} → {e}")
                 mistake_count += 1
 
         if not success:
-            logging.info("[Debug] スコア一致せず → 失敗処理へ")
             mistake_count += 1
 
             try:
                 conn = sqlite3.connect(param_db_path)
                 c = conn.cursor()
-                logging.info("[Debug] SQLite接続完了（失敗）")
 
                 if chosen_row:
                     # 既存の行を更新
@@ -331,7 +329,6 @@ def warmup_and_check_all_images():
                             threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
                         ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
                     """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                    logging.info("[Debug] INSERT OR IGNORE 実行（失敗）")
 
                     c.execute("""
                         UPDATE warmup_params
@@ -339,7 +336,6 @@ def warmup_and_check_all_images():
                         WHERE threshold = ? AND blur = ? AND contrast_scaled = ? AND resize_ratio_scaled = ?
                         AND gaussian_blur = ? AND use_clahe = ?
                     """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                    logging.info("[Debug] 失敗カウント更新済み")
                 else:
                     # 新規ランダム生成パラメータとしてINSERTまたはUPDATE
                     c.execute("""
@@ -349,13 +345,12 @@ def warmup_and_check_all_images():
                         ON CONFLICT(threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe) DO UPDATE SET
                             total_count = total_count + 1
                     """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                    logging.info("[Debug] 新規パラメータでINSERTまたはUPDATE（失敗）")
 
                 conn.commit()
                 conn.close()
-                logging.info("[Debug] SQLiteコミット・クローズ完了（失敗）")
             except Exception as e:
                 logging.warning(f"[Warmup] SQLite失敗統計更新失敗: {e}")
+
 
 def preprocess_image_for_ocr(image, threshold, blur_ksize, contrast, resize_ratio, gaussian_blur_ksize, use_clahe):
     img = image.copy()
@@ -393,39 +388,93 @@ def preprocess_image_for_ocr_simple(image):
     return blurred
 
 def extract_perfect_miss_positions(image):
-    # 画像がグレースケール（2次元）なら前処理スキップ
+    def get_saved_params():
+        saved_params = []
+        db_path = '/app/data/warmup_success_params.sqlite'
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT *, 
+                    CASE WHEN total_count = 0 THEN 0 ELSE CAST(success_count AS FLOAT)/total_count END AS success_rate 
+                FROM warmup_params
+                WHERE total_count > 0
+                ORDER BY success_rate DESC
+                LIMIT 10
+            """)
+            saved_params = [dict(row) for row in cur.fetchall()]
+            conn.close()
+        except Exception as e:
+            logging.warning(f"[extract] SQLite 読み込み失敗: {e}")
+        return saved_params
+
+    def detect_positions(img):
+        details = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+        perfect_positions = []
+        miss_positions = []
+        perfect_text_positions = []
+
+        for i, word in enumerate(details['text']):
+            if 'ALL' in word.upper():
+                if i+1 < len(details['text']) and 'PERFECT' in details['text'][i+1].upper():
+                    x = details['left'][i]
+                    y = details['top'][i]
+                    w = details['width'][i] + details['width'][i+1]
+                    h = max(details['height'][i], details['height'][i+1])
+                    perfect_text_positions.append((x, y, w, h))
+
+        blackout_img = img.copy()
+        for (x, y, w, h) in perfect_text_positions:
+            cv2.rectangle(blackout_img, (x, y), (x + w, y + h), (0, 0, 0), -1)
+
+        details2 = pytesseract.image_to_data(blackout_img, output_type=pytesseract.Output.DICT)
+        for i, word in enumerate(details2['text']):
+            if 'PERFECT' in word.upper():
+                (x, y, w, h) = (details2['left'][i], details2['top'][i], details2['width'][i], details2['height'][i])
+                perfect_positions.append((x, y, w, h))
+            if 'MISS' in word.upper():
+                (x, y, w, h) = (details2['left'][i], details2['top'][i], details2['width'][i], details2['height'][i])
+                miss_positions.append((x, y, w, h))
+        return perfect_positions, miss_positions
+
+    # 1回目（簡易前処理）
     if len(image.shape) == 2:
         preprocessed_img = image.copy()
     else:
         preprocessed_img = preprocess_image_for_ocr_simple(image)
-    
-    details = pytesseract.image_to_data(preprocessed_img, output_type=pytesseract.Output.DICT)
-    all_perfect_positions = []
-    all_miss_positions = []
-    all_perfect_text_positions = []
-    # まずALL PERFECTの位置を探す
-    for i, word in enumerate(details['text']):
-        if 'ALL' in word.upper():
-            if i+1 < len(details['text']) and 'PERFECT' in details['text'][i+1].upper():
-                x = details['left'][i]
-                y = details['top'][i]
-                w = details['width'][i] + details['width'][i+1]
-                h = max(details['height'][i], details['height'][i+1])
-                all_perfect_text_positions.append((x, y, w, h))
-    
-    blackout_img = preprocessed_img.copy()
-    for (x, y, w, h) in all_perfect_text_positions:
-        cv2.rectangle(blackout_img, (x, y), (x + w, y + h), (0, 0, 0), -1)
-    
-    details2 = pytesseract.image_to_data(blackout_img, output_type=pytesseract.Output.DICT)
-    for i, word in enumerate(details2['text']):
-        if 'PERFECT' in word.upper():
-            (x, y, w, h) = (details2['left'][i], details2['top'][i], details2['width'][i], details2['height'][i])
-            all_perfect_positions.append((x, y, w, h))
-        if 'MISS' in word.upper():
-            (x, y, w, h) = (details2['left'][i], details2['top'][i], details2['width'][i], details2['height'][i])
-            all_miss_positions.append((x, y, w, h))
-    return all_perfect_positions, all_miss_positions
+    perfects, misses = detect_positions(preprocessed_img)
+    if perfects or misses:
+        return perfects, misses
+
+    # 2回目（SQLiteからパラメータ取得して再前処理）
+    saved_params = get_saved_params()
+
+    def to_int_safe(val):
+        if isinstance(val, bytes):
+            return int.from_bytes(val, byteorder='little')
+        return int(val)
+
+    for params in saved_params:
+        try:
+            blur_ksize = to_int_safe(params.get('blur', 0))
+            threshold = to_int_safe(params.get('threshold', 128))
+            contrast = float(params.get('contrast_scaled', 100)) / 100
+            resize_ratio = float(params.get('resize_ratio_scaled', 100)) / 100
+            gaussian_blur = to_int_safe(params.get('gaussian_blur', 0))
+            use_clahe = bool(params.get('use_clahe', False))
+
+            processed = preprocess_image_for_ocr(
+                image, threshold, blur_ksize, contrast, resize_ratio,
+                gaussian_blur_ksize=gaussian_blur, use_clahe=use_clahe
+            )
+            perfects, misses = detect_positions(processed)
+            if perfects or misses:
+                return perfects, misses
+        except Exception as e:
+            logging.warning(f"[extract retry] 再処理エラー: {e}")
+
+    return [], []
 
 def blackout_positions(image, positions):
     for (x, y, w, h) in positions:
@@ -467,6 +516,7 @@ def to_float_safe(value, scale=1.0):
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
     label_regions = []
+    logging.info("ラベル領域初期化")
     if 'image' not in request.files:
         return jsonify({'error': 'No image uploaded'}), 400
     file = request.files['image']
@@ -475,6 +525,8 @@ def ocr_endpoint():
     file.save(in_memory_file)
     data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
     img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+    logging.info(f"画像読み込み成功: img.shape={img.shape if img is not None else 'None'}")
 
     # 画像のアスペクト比を調整して中央切り抜き
     h, w = img.shape[:2]
@@ -494,6 +546,7 @@ def ocr_endpoint():
     img = cv2.resize(img, (1800, 1080), interpolation=cv2.INTER_AREA)
     processed_img = img.copy()
     all_perfect_positions, all_miss_positions = [], []
+    logging.info("perfect/miss 抽出処理開始")
     for _ in range(5):
         perfect_positions, miss_positions = extract_perfect_miss_positions(processed_img)
         all_perfect_positions.extend(perfect_positions)
@@ -512,6 +565,10 @@ def ocr_endpoint():
         y_label = max(0, y_perfect - int(base_length * 0.1))
         label_regions.append((x_label, y_label, square_width, square_height))
     label_regions.sort(key=lambda r: r[0])
+    logging.info(f"抽出された perfect/miss の数: {len(all_perfect_positions)} / {len(all_miss_positions)}")
+    logging.info(f"生成されたラベル領域数: {len(label_regions)}")
+    if not label_regions:
+        logging.warning("ラベル領域が 0 件だったためスコア認識処理をスキップします")
     all_player_scores = []
     player_number = 1
     summary_lines = []
@@ -542,9 +599,11 @@ def ocr_endpoint():
 
     # パラメータがある場合はそれらを順に使う（最大10件）
     for region in label_regions:
+        logging.info(f"Player_{player_number} の領域開始: {region}")
         x_label, y_label, square_width, square_height = region
         crop = img[y_label:y_label+square_height, x_label:x_label+square_width]
         if crop.size == 0:
+            logging.warning(f"Player_{player_number}: crop.size == 0 でスキップされました")
             player_number += 1
             continue
         half = crop.shape[1] // 2
@@ -621,6 +680,7 @@ def ocr_endpoint():
                     summary_lines.append(f"Player_{player_number}: 状態=正常 \n-# PERFECT={perfect_val}, GREAT={great_val}, GOOD={good_val}, BAD={bad_val}, MISS={miss_val}, スコア={score}")
                     break
                 except Exception as e:
+                    logging.warning(f"[Player_{player_number}] OCR試行中に例外が発生（attempt={attempt}）: {e}")
                     continue
 
         if not ocr_success:
