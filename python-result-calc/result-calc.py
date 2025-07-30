@@ -144,7 +144,7 @@ def get_random_prob(param_db_path='/app/data/warmup_success_params.sqlite'):
         return 1.0 - 0.9 * (count / max_count)
 
 def warmup_and_check_all_images():
-    logging.debug("warmup_and_check_all_images 開始")
+    logging.info("warmup_and_check_all_images 開始")
     warmup_dir = '/app/data/warmup'
     param_db_path = '/app/data/warmup_success_params.sqlite'
     if not os.path.isdir(warmup_dir):
@@ -221,6 +221,11 @@ def warmup_and_check_all_images():
             y_label = max(0, y_perfect - int(base_length * 0.1))
             label_regions.append((x_label, y_label, square_width, square_height))
         label_regions.sort(key=lambda r: r[0])
+
+        if not label_regions:
+            logging.warning(f"[Warmup] ラベル領域が0件のためスキップ: {fname}")
+            mistake_count += 1
+            continue
         for region in label_regions:
             x, y, w_, h_ = region
             crop = img[y:y+h_, x:x+w_]
@@ -245,15 +250,21 @@ def warmup_and_check_all_images():
         if use_ucb:
             total_trials = sum(row[-1] for row in rows) or 1
             best_score = -float('inf')
+            best_rows = []
             for row in rows:
                 _, th, bl, ct_scaled, rs_scaled, gb, uc, success_count, total_count = row
-                if total_count == 0:
+                if total_count == 0 or (success_count == 0 and total_count > 10):
                     continue
                 average = success_count / total_count
                 ucb_score = average + 1.0 / (1 + total_count) + math.sqrt(2 * math.log(total_trials) / total_count)
                 if ucb_score > best_score:
                     best_score = ucb_score
-                    chosen_row = row
+                    best_rows = [row]
+                elif ucb_score == best_score:
+                    best_rows.append(row)
+
+            if best_rows:
+                chosen_row = best_rows[np.random.randint(len(best_rows))]
 
         if chosen_row:
             _, th, bl, ct_scaled, rs_scaled, gb, uc, _, _ = chosen_row
@@ -350,7 +361,6 @@ def warmup_and_check_all_images():
                 conn.close()
             except Exception as e:
                 logging.warning(f"[Warmup] SQLite失敗統計更新失敗: {e}")
-
 
 def preprocess_image_for_ocr(image, threshold, blur_ksize, contrast, resize_ratio, gaussian_blur_ksize, use_clahe):
     img = image.copy()
