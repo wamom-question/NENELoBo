@@ -9,6 +9,7 @@ LAST_CHECK_FILE = "last_check.txt"
 DATA_URL = "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/main/userInformations.json"
 
 # loggingの設定
+log = logging.getLogger('werkzeug')
 logging.basicConfig(level=logging.ERROR)  # エラーログのみ出力
 
 # 前回のチェック時刻を取得

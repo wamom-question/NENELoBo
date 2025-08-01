@@ -14,7 +14,9 @@ const clientId = process.env.CLIENT_ID;
 const channelId = process.env.ANNOUNCEMENT_CHANNEL_ID;  // お知らせを送るチャンネルID
 const guildId = process.env.GUILD_ID; // テスト用のギルドID
 const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python_announce_fetcher:5000/announcements'; // PythonのAPIエンドポイント
-const ocrAlwaysChannelId = process.env.OCR_ALWAYS_CHANNEL_ID; // OCRを常に実行するチャンネルID
+const ocrAlwaysChannelIds = process.env.OCR_ALWAYS_CHANNEL_ID
+  ? process.env.OCR_ALWAYS_CHANNEL_ID.split(',').map(id => id.trim())
+  : [];
 const priorityQueue = [];
 const normalQueue = [];
 
@@ -120,10 +122,13 @@ async function fetchAnnouncementText() {
   try {
     const response = await fetch(ANNOUNCEMENT_API);
     const text = await response.text();
-    if (text && text.trim() !== "新しいお知らせはありません。") {
-      return text;
+
+    // 無意味な場合は null を返す
+    if (!text || text.trim() === "新しいお知らせはありません。") {
+      return null;
     }
-    return null;
+
+    return text;
   } catch (error) {
     console.error(`API 接続エラー: ${error.message}`);
     return null;
@@ -131,15 +136,18 @@ async function fetchAnnouncementText() {
 }
 
 async function handleAnnouncementText(text) {
-  if (!text) return;
+  if (!text) return; // null や空文字なら即終了
+
   const channel = client.channels.cache.get(channelId);
-  if (channel) {
-    channel.send(text + "\n\n<@&1307026514071523341>");
-  } else {
+  if (!channel) {
     console.error('チャンネルが見つかりません。');
+    return;
   }
 
-  // 🔍「プロセカ放送局#◯◯」に一致した場合、イベント作成
+  // 通常メッセージ送信
+  await channel.send(text + "\n\n<@&1307026514071523341>");
+
+  // 放送局のメッセージにマッチしたら Discordイベント作成
   const match = text.match(/(\d{1,2})月(\d{1,2})日(\d{1,2})時(\d{1,2})分より「プロセカ放送局#(\d+)」を生配信/);
   if (match) {
     const [, monthStr, dayStr, hourStr, minuteStr, numberStr] = match;
@@ -156,7 +164,6 @@ async function handleAnnouncementText(text) {
     const utcStart = new Date(jstStart.getTime() - 9 * 60 * 60 * 1000);
     const utcEnd = new Date(utcStart.getTime() + 2 * 60 * 60 * 1000);
 
-    // Only create the event if the current server's ID matches the allowed guildId
     if (guildId && client.guilds.cache.has(guildId)) {
       const guild = await client.guilds.fetch(guildId);
       const event = await guild.scheduledEvents.create({
@@ -169,10 +176,7 @@ async function handleAnnouncementText(text) {
         description: '「プロセカ放送局」の生配信イベントです。',
       });
 
-      if (channel) {
-        channel.send(`📢 Discordイベントを作成しました！\n${event.url}`);
-      }
-
+      await channel.send(`📢 Discordイベントを作成しました！\n${event.url}`);
       console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
     }
   }
@@ -458,7 +462,7 @@ client.on('messageCreate', async (message) => {
 // ocrAlwaysChannelId で画像付きメッセージが送信された場合にOCR APIへ送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (ocrAlwaysChannelId && message.channel.id === ocrAlwaysChannelId && message.attachments.size > 0) {
+  if (ocrAlwaysChannelIds.includes(message.channel.id) && message.attachments.size > 0) {
     const imageAttachments = [...message.attachments.values()].filter(att => att.contentType && att.contentType.startsWith('image'));
     const isMultipleImages = imageAttachments.length >= 2;
         if (isMultipleImages) {

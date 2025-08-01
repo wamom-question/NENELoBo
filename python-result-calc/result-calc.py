@@ -143,8 +143,19 @@ def get_random_prob(param_db_path='/app/data/warmup_success_params.sqlite'):
         # 線形に0.9減らす
         return 1.0 - 0.9 * (count / max_count)
 
+def float_to_stored_int(val: float) -> int:
+    """小数を逆順で整数に変換（例: 1.2 → 21）"""
+    whole = int(val)
+    decimal = int((val - whole) * 10)
+    return decimal * 10 + whole
+
+def stored_int_to_float(stored: int) -> float:
+    """保存された整数を小数に戻す（例: 21 → 1.2）"""
+    whole = stored % 10
+    decimal = stored // 10
+    return whole + decimal / 10
+
 def warmup_and_check_all_images():
-    logging.info("warmup_and_check_all_images 開始")
     warmup_dir = '/app/data/warmup'
     param_db_path = '/app/data/warmup_success_params.sqlite'
     if not os.path.isdir(warmup_dir):
@@ -245,18 +256,61 @@ def warmup_and_check_all_images():
         else:
             rows = []
 
+        # 既存パラメータを元に探索精度を段階的に広げる
+        expanded_rows = []
+        # 定数の定義
+        MAX_SUCCESS_COUNT = 30  # 実績の十分な基準値
+
+        # 成功率計算式の修正
+        for row in rows:
+            row_id, th, bl, contrast_scaled, resize_ratio_scaled, gb, uc, success_count, total_count = row
+            if total_count == 0:
+                continue
+            
+            effective_success = min(success_count, MAX_SUCCESS_COUNT)
+            success_rate = (success_count / total_count) * (success_count / (success_count + 5))
+
+            # 0.1単位の基本行は常に含める
+            expanded_rows.append(row)
+
+            # 条件に応じて精度を上げて追加
+            if total_count >= 10 and success_rate > 0.6:
+                for delta_c in [-5, 0, 5]:
+                    for delta_r in [-5, 0, 5]:
+                        new_contrast_scaled = contrast_scaled + delta_c  # 0.01単位で調整（×100）
+                        new_resize_ratio_scaled = resize_ratio_scaled + delta_r
+                        if (delta_c != 0 or delta_r != 0):
+                            expanded_rows.append((
+                                row_id, th, bl, new_contrast_scaled, new_resize_ratio_scaled, gb, uc, success_count, total_count
+                            ))
+        rows = expanded_rows
+
         chosen_row = None
-        use_ucb = np.random.rand() < 0.6 and rows  # 60%の確率でUCB、40%はランダム
+
+        rand_val = np.random.rand()
+        use_ucb = rand_val < 0.2 and rows # 20%の確率でUCBを使用
+        use_low_count = 0.2 <= rand_val < 0.6 and rows # 40%の確率で低カウント優先、残りはランダム
+
         if use_ucb:
             total_trials = sum(row[-1] for row in rows) or 1
             best_score = -float('inf')
             best_rows = []
+            
             for row in rows:
-                _, th, bl, ct_scaled, rs_scaled, gb, uc, success_count, total_count = row
+                _, th, bl, contrast_scaled, resize_ratio_scaled, gb, uc, success_count, total_count = row
                 if total_count == 0 or (success_count == 0 and total_count > 10):
                     continue
+
                 average = success_count / total_count
-                ucb_score = average + 1.0 / (1 + total_count) + math.sqrt(2 * math.log(total_trials) / total_count)
+                weight = success_count / (success_count + 5)
+                weighted_average = average * weight
+
+                ucb_score = (
+                    weighted_average +
+                    1.0 / (1 + total_count) +
+                    math.sqrt(2 * math.log(total_trials) / total_count)
+                )
+
                 if ucb_score > best_score:
                     best_score = ucb_score
                     best_rows = [row]
@@ -265,11 +319,18 @@ def warmup_and_check_all_images():
 
             if best_rows:
                 chosen_row = best_rows[np.random.randint(len(best_rows))]
+        
+        elif use_low_count:
+            # トータルカウントが少ない順にソートして上位100個からランダム選択
+            sorted_rows = sorted(rows, key=lambda r: r[8])  # total_countがインデックス8
+            top_100 = sorted_rows[:100]
+            if top_100:
+                chosen_row = top_100[np.random.randint(len(top_100))]
 
         if chosen_row:
-            _, th, bl, ct_scaled, rs_scaled, gb, uc, _, _ = chosen_row
-            contrast_scaled = ct_scaled / 100
-            resize_ratio = rs_scaled / 100
+            _, th, bl, contrast_scaled, resize_ratio_scaled, gb, uc, _, _ = chosen_row
+            contrast = stored_int_to_float(contrast_scaled)
+            resize_ratio = stored_int_to_float(resize_ratio_scaled)
             threshold = decode_sqlite_int(th)
             blur_ksize = decode_sqlite_int(bl)
             gaussian_blur_ksize = decode_sqlite_int(gb)
@@ -277,13 +338,13 @@ def warmup_and_check_all_images():
         else:
             threshold = np.random.randint(100, 220)
             blur_ksize = np.random.choice([1, 3, 5, 7, 9])
-            contrast_scaled = np.random.uniform(0.6, 2.0)
+            contrast = np.random.uniform(0.6, 2.0)
             resize_ratio = np.random.uniform(0.6, 1.6)
             gaussian_blur_ksize = np.random.choice([0, 1, 3, 5, 7, 9])
             use_clahe = np.random.rand() < 0.5
 
-        contrast = int(contrast_scaled * 100)
-        resize_ratio_scaled = int(resize_ratio * 100)
+        contrast_scaled = float_to_stored_int(contrast)
+        resize_ratio_scaled = float_to_stored_int(resize_ratio)
 
         # OCR処理
         preprocessed = preprocess_image_for_ocr(
@@ -295,21 +356,17 @@ def warmup_and_check_all_images():
         if len(ocr_result) >= 5:
             try:
                 ocr_nums = list(map(int, ocr_result[:5]))
-                logging.info(f"[Debug] OCR結果: {ocr_nums}, 期待値: {expected}")
                 if ocr_nums == expected:
                     success = True
-                    logging.info("[Debug] スコア一致 → 成功記録処理へ")
                     # 成功パラメータの挿入（存在しなければ）
                     try:
                         conn = sqlite3.connect(param_db_path)
                         c = conn.cursor()
-                        logging.info("[Debug] SQLite接続完了（成功）")
                         c.execute("""
                             INSERT OR IGNORE INTO warmup_params (
                                 threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
                             ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
                         """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                        logging.info("[Debug] INSERT OR IGNORE 実行")
                         c.execute("""
                             UPDATE warmup_params
                             SET success_count = success_count + 1,
@@ -317,10 +374,8 @@ def warmup_and_check_all_images():
                             WHERE threshold = ? AND blur = ? AND contrast_scaled = ? AND resize_ratio_scaled = ?
                             AND gaussian_blur = ? AND use_clahe = ?
                         """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                        logging.info("[Debug] 成功カウント更新済み")
                         conn.commit()
                         conn.close()
-                        logging.info("[Debug] SQLiteコミット・クローズ完了")
                     except Exception as e:
                         logging.warning(f"[Warmup] SQLite成功統計保存失敗: {e}")
             except Exception as e:
@@ -469,8 +524,10 @@ def extract_perfect_miss_positions(image):
         try:
             blur_ksize = to_int_safe(params.get('blur', 0))
             threshold = to_int_safe(params.get('threshold', 128))
-            contrast = float(params.get('contrast_scaled', 100)) / 100
-            resize_ratio = float(params.get('resize_ratio_scaled', 100)) / 100
+            contrast_scaled = to_int_safe(params.get('contrast_scaled', 10))
+            resize_ratio_scaled = to_int_safe(params.get('resize_ratio_scaled', 10))
+            contrast = stored_int_to_float(contrast_scaled)
+            resize_ratio = stored_int_to_float(resize_ratio_scaled)
             gaussian_blur = to_int_safe(params.get('gaussian_blur', 0))
             use_clahe = bool(params.get('use_clahe', False))
 
@@ -593,10 +650,14 @@ def ocr_endpoint():
         # 成功率でソート（total_count=0防止にCASE文）、上位10件取得
         cur.execute("""
             SELECT *, 
-                CASE WHEN total_count = 0 THEN 0 ELSE CAST(success_count AS FLOAT)/total_count END AS success_rate 
+                CASE 
+                    WHEN total_count = 0 THEN 0 
+                    ELSE (CAST(success_count AS FLOAT) / total_count) *
+                        (CAST(success_count AS FLOAT) / (success_count + 5))
+                END AS weighted_score
             FROM warmup_params
-            WHERE total_count > 0
-            ORDER BY success_rate DESC
+            WHERE total_count > 5
+            ORDER BY weighted_score DESC
             LIMIT 10
         """)
         saved_params = [dict(row) for row in cur.fetchall()]
@@ -622,13 +683,12 @@ def ocr_endpoint():
         ocr_success = False
         debug_crop_b64 = None
         debug_pre_b64 = None
-        debug_params = None
 
         for attempt, chosen in enumerate(saved_params):
             threshold = to_int_safe(chosen['threshold'])
             blur_ksize = to_int_safe(chosen['blur'])
-            contrast = to_float_safe(chosen['contrast_scaled'], 100)
-            resize_ratio = to_float_safe(chosen['resize_ratio_scaled'], 100)
+            contrast = stored_int_to_float(chosen['contrast_scaled'])
+            resize_ratio = stored_int_to_float(chosen['resize_ratio_scaled'])
             gaussian_blur_ksize = to_int_safe(chosen.get('gaussian_blur', 0))
             use_clahe = bool(chosen.get('use_clahe', False))
 
