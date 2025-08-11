@@ -1,6 +1,10 @@
 import dotenv from 'dotenv';
 dotenv.config();  // .envファイルを読み込む
 
+const eventChannelIds = process.env.EVENT_CHANNEL_ID
+  ? process.env.EVENT_CHANNEL_ID.split(',').map(id => id.trim())
+  : [];
+
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel } from 'discord.js';
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
@@ -11,8 +15,13 @@ import FormData from 'form-data';
 // 環境変数から設定を読み込む
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.CLIENT_ID;
-const channelId = process.env.ANNOUNCEMENT_CHANNEL_ID;  // お知らせを送るチャンネルID
-const guildId = process.env.GUILD_ID; // テスト用のギルドID
+// 複数のチャンネルIDとサーバーIDを配列として取得
+const channelIds = process.env.ANNOUNCEMENT_CHANNEL_ID
+  ? process.env.ANNOUNCEMENT_CHANNEL_ID.split(',').map(id => id.trim())
+  : [];
+const guildIds = process.env.GUILD_ID
+  ? process.env.GUILD_ID.split(',').map(id => id.trim())
+  : [];
 const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python_announce_fetcher:5000/announcements'; // PythonのAPIエンドポイント
 const ocrAlwaysChannelIds = process.env.OCR_ALWAYS_CHANNEL_ID
   ? process.env.OCR_ALWAYS_CHANNEL_ID.split(',').map(id => id.trim())
@@ -65,17 +74,29 @@ const rest = new REST({ version: '10' }).setToken(token);
 (async () => {
   try {
     console.log('Started refreshing application (/) commands.');
-    if (!clientId || !guildId) {
+    if (!clientId || !guildIds.length) {
       console.error('CLIENT_ID または GUILD_ID が設定されていません。');
       return;
     }
+
+    // ギルドごとにコマンド登録（即時反映）
+    for (const guildId of guildIds) {
+      await rest.put(
+        Routes.applicationGuildCommands(clientId, guildId),
+        { body: commands }
+      );
+      console.log(`✅ ギルドコマンドを登録しました（GUILD_ID=${guildId}）`);
+    }
+
+    // グローバルにも登録（最大1時間ほど反映にかかる）
     await rest.put(
-      Routes.applicationGuildCommands(clientId, guildId),
+      Routes.applicationCommands(clientId),
       { body: commands }
     );
-    console.log('Successfully reloaded application (/) commands.');
+    console.log('✅ グローバルコマンドを登録しました。');
+
   } catch (error) {
-    console.error(error);
+    console.error('❌ コマンド登録失敗:', error);
   }
 })();
 
@@ -121,6 +142,12 @@ let latestAnnouncementText = null;
 async function fetchAnnouncementText() {
   try {
     const response = await fetch(ANNOUNCEMENT_API);
+    // ここでHTTPステータス確認
+    if (!response.ok) {
+      console.error(`API HTTPエラー: ${response.status}`);
+      return null;
+    }
+
     const text = await response.text();
 
     // 無意味な場合は null を返す
@@ -135,17 +162,28 @@ async function fetchAnnouncementText() {
   }
 }
 
+const roleIds = process.env.ANNOUNCEMENT_ROLE_IDS
+  ? process.env.ANNOUNCEMENT_ROLE_IDS.split(',').map(id => id.trim())
+  : [];
+
 async function handleAnnouncementText(text) {
   if (!text) return; // null や空文字なら即終了
 
-  const channel = client.channels.cache.get(channelId);
-  if (!channel) {
-    console.error('チャンネルが見つかりません。');
-    return;
-  }
+  for (let i = 0; i < channelIds.length; i++) {
+    const channelId = channelIds[i];
+    const channel = client.channels.cache.get(channelId);
+    if (!channel) {
+      console.error(`チャンネルが見つかりません: ${channelId}`);
+      continue;
+    }
 
-  // 通常メッセージ送信
-  await channel.send(text + "\n\n<@&1307026514071523341>");
+    // 対応するロールIDを取得
+    const roleId = roleIds[i] || '0'; // デフォルトで無効なID
+    const mention = roleId !== '0' ? `<@&${roleId}>` : '@here';
+
+    // 通常メッセージ送信
+    await channel.send(`${text}\n\n${mention}`);
+  }
 
   // 放送局のメッセージにマッチしたら Discordイベント作成
   const match = text.match(/(\d{1,2})月(\d{1,2})日(\d{1,2})時(\d{1,2})分より「プロセカ放送局#(\d+)」を生配信/);
@@ -164,20 +202,36 @@ async function handleAnnouncementText(text) {
     const utcStart = new Date(jstStart.getTime() - 9 * 60 * 60 * 1000);
     const utcEnd = new Date(utcStart.getTime() + 2 * 60 * 60 * 1000);
 
-    if (guildId && client.guilds.cache.has(guildId)) {
-      const guild = await client.guilds.fetch(guildId);
-      const event = await guild.scheduledEvents.create({
-        name: `プロセカ放送局#${number}`,
-        scheduledStartTime: utcStart,
-        scheduledEndTime: utcEnd,
-        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-        entityType: GuildScheduledEventEntityType.Voice,
-        channel: '1248602145133953046',
-        description: '「プロセカ放送局」の生配信イベントです。',
-      });
+    for (const guildId of guildIds) {
+      if (client.guilds.cache.has(guildId)) {
+        const guild = await client.guilds.fetch(guildId);
+        const eventChannelId = eventChannelIds[guildIds.indexOf(guildId)];
+        if (!eventChannelId) {
+            console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
+            continue;
+        }
+        const event = await guild.scheduledEvents.create({
+          name: `プロセカ放送局#${number}`,
+          scheduledStartTime: utcStart,
+          scheduledEndTime: utcEnd,
+          privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+          entityType: GuildScheduledEventEntityType.Voice,
+          channel: eventChannelId,
+          description: '「プロセカ放送局」の生配信イベントです。',
+        });
 
-      await channel.send(`📢 Discordイベントを作成しました！\n${event.url}`);
-      console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
+        for (let i = 0; i < channelIds.length; i++) {
+          const channelId = channelIds[i];
+          const channel = client.channels.cache.get(channelId);
+          if (channel) {
+            const roleId = roleIds[i] || '0';
+            const mention = roleId !== '0' ? `<@&${roleId}>` : '@here';
+            await channel.send(`📢 Discordイベントを作成しました！\n${event.url}\n\n${mention}`);
+          }
+        }
+
+        console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
+      }
     }
   }
 }
@@ -367,17 +421,33 @@ client.on('messageCreate', async (message) => {
                 lines.push(row);
               }
 
-              // スコアで順位付け
-              const scores = result.results.map((p, i) => ({ idx: i + 1, score: p.score }));
-              scores.sort((a, b) => b.score - a.score);
-              const rankLines = scores.map((s, i) => {
-                const rank = i + 1;
-                const player = `Player_${s.idx}`;
-                if (rank === 1) return `# 1位    ${player}`;
-                if (rank === 2) return `## 2位    ${player}`;
-                if (rank === 3) return `## 3位    ${player}`;
-                return `${rank}位    ${player}`;
+              // スコアと精度で順位付け（①スコア優先、③同点なら同順位）
+              const scores = result.results.map((p, i) => ({
+                idx: i + 1,
+                score: p.score,
+                weight: p.perfect * 1000 + p.great * 10 + p.good * 5 - p.bad * 100 - p.miss * 500
+              }));
+
+              // スコア → 重み付き精度 でソート
+              scores.sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return b.weight - a.weight;
               });
+
+              const rankLines = [];
+              let currentRank = 1;
+              for (let i = 0; i < scores.length; i++) {
+                const { idx, score, weight } = scores[i];
+                const player = `Player_${idx}`;
+                if (i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
+                  // 同点なら順位維持（③）
+                  rankLines.push(`## ${currentRank}位    ${player}（同率）`);
+                } else {
+                  currentRank = i + 1;
+                  const prefix = currentRank === 1 ? '#' : '##';
+                  rankLines.push(`${prefix} ${currentRank}位    ${player}`);
+                }
+              }
 
               const reply = [
                 '### 認識結果',

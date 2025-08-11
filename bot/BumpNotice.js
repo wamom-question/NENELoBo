@@ -326,7 +326,7 @@ async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
 
 export function setupBumpNoticeHandler(client) {
   client.on(Events.MessageCreate, async (message) => {
-    const allowedGuildId = process.env.GUILD_ID;
+    const allowedGuildId = process.env.BUMP_SURVEIL_GUILD;
     if (allowedGuildId && message.guildId !== allowedGuildId) return;
     if (message.author.id === '302050872383242240') {
       console.log('📥 Disboard メッセージ検知:', message.embeds[0]?.description || '[内容なし]');
@@ -422,7 +422,7 @@ export function setupBumpNoticeHandler(client) {
 
   const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
   if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) <= new Date()) {
-    sendNextBumpNotification(client, new Date(nextBumpData.nextBumpTime), process.env.GUILD_ID);
+    sendNextBumpNotification(client, new Date(nextBumpData.nextBumpTime), process.env.BUMP_SURVEIL_GUILD);
   } else if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) > new Date()) {
     const { nextBumpTime, guildId } = nextBumpData;
     const start = Date.now();
@@ -440,7 +440,7 @@ export function setupNextBumpOnStartup(client) {
 
     if (nextBumpTime > now && !data.notified) {
       const delay = nextBumpTime.getTime() - now.getTime();
-      const guildId = data.guildId || process.env.GUILD_ID;
+      const guildId = data.guildId || process.env.BUMP_SURVEIL_GUILD;
 
       // MAIN_BUMP_CHANNEL_ID に通知を送信
       client.channels.fetch(process.env.MAIN_BUMP_CHANNEL_ID).then(async (mainChannel) => {
@@ -601,11 +601,11 @@ export async function handleNextBumpCommand(interaction, client) {
 
     const embedMessage = createEmbed(
       '次のBump時間',
-      `${nextBumpTime.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} にBump可能です。\nあと ${timeLeftStr} 待ってください。\n[ここ](https://discord.com/channels/${process.env.GUILD_ID}/${targetId})でお知らせします。`
+      `${nextBumpTime.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} にBump可能です。\nあと ${timeLeftStr} 待ってください。\n[ここ](https://discord.com/channels/${process.env.BUMP_SURVEIL_GUILD}/${targetId})でお知らせします。`
     );
 
-    // 投稿先をprocess.env.GUILD_IDのメインチャンネルに変更
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
+    // 投稿先をprocess.env.BUMP_SURVEIL_GUILDのメインチャンネルに変更
+    const guild = await client.guilds.fetch(process.env.BUMP_SURVEIL_GUILD);
     const mainChannel = await guild.channels.fetch(process.env.MAIN_BUMP_CHANNEL_ID);
     if (mainChannel) {
       await mainChannel.send({ embeds: [embedMessage] });

@@ -1,3 +1,5 @@
 .env
 ._*
 data/*
+.gitignore
+.DS_Store
