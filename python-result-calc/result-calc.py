@@ -57,7 +57,7 @@ def warmup_loop():
             success_count = 0
 
         # 学習の進み具合に応じて sleep 間隔を変化させる（最大5分まで）
-        min_interval = 5      # 秒
+        min_interval = 60      # 秒
         max_interval = 300    # 秒（＝5分）
         max_success = 20000
 
@@ -201,16 +201,8 @@ def warmup_and_check_all_images():
             mistake_count += 1
             continue
 
-        h, w = img.shape[:2]
-        target_w = int(5/3 * h)
-        target_h = int(3/5 * w)
-        if w > target_w:
-            x_start = (w - target_w) // 2
-            img = img[:, x_start:x_start+target_w]
-        if h > target_h:
-            y_start = (h - target_h) // 2
-            img = img[y_start:y_start+target_h, :]
-        img = cv2.resize(img, (1800, 1080), interpolation=cv2.INTER_AREA)
+        # 解像度を下げてメモリ使用量を削減
+        img = cv2.resize(img, (900, 540), interpolation=cv2.INTER_AREA)
 
         processed_img = img.copy()
         all_perfect_positions, all_miss_positions = [], []
@@ -444,6 +436,7 @@ def preprocess_image_for_ocr(image, threshold, blur_ksize, contrast, resize_rati
         blurred = cv2.GaussianBlur(thresh, (blur_ksize, blur_ksize), 0)
     else:
         blurred = thresh
+    del hsv_image, mask_bg1, mask_bg2, combined_mask  # メモリ解放
     return blurred
 
 def preprocess_image_for_ocr_simple(image):
@@ -579,6 +572,14 @@ def to_float_safe(value, scale=1.0):
     if isinstance(value, bytes):
         return int.from_bytes(value, byteorder='little') / scale
     return float(value) / scale
+
+# EasyOCRモデルを必要時に初期化する関数
+def get_easyocr_reader():
+    try:
+        return easyocr.Reader(['en'], gpu=False)
+    except Exception as e:
+        logging.error(f"EasyOCRの初期化に失敗しました: {e}")
+        raise
 
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
@@ -783,13 +784,12 @@ def ocr_endpoint():
     return jsonify(response)
 
 if __name__ == '__main__':
-    _ = reader.readtext(np.ones((100, 300), dtype=np.uint8), detail=0)
-    logging.info("[Startup] EasyOCRモデル初期化完了")
+    # EasyOCRモデルの初期化を遅延実行に変更
+    logging.info("[Startup] OCR APIサーバー起動")
     init_warmup_db()
     logging.info("[Startup] ウォームアップDB初期化完了")
     warmup_and_check_all_images()
     logging.info("[Startup] ウォームアップ処理完了")
     start_warmup_thread()
     logging.info("[Startup] ウォームアップスレッド開始")
-    logging.info("[Startup] OCR APIサーバー起動")
     app.run(host='0.0.0.0', port=5000)

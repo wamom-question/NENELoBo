@@ -6,7 +6,9 @@ import fetch from 'node-fetch';
 import { EmbedBuilder, Events } from 'discord.js';
 import { calculateCombinationProbability } from './gacha.js';
 
-const BUMP_GACHA_COUNT_FILE = '/app/data/bumpGachaCount.json';
+const jstNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+const currentYear = jstNow.getFullYear();
+const BUMP_GACHA_COUNT_FILE = `/app/data/bumpGachaCount${currentYear}.json`;
 const NEXT_BUMP_FILE = '/app/data/Nextbump.json';
 
 // スレッドIDの形式: 'チャンネルID/スレッドID' ではなく、スレッド自体のIDを記述（DiscordからスレッドIDを直接取得）
@@ -188,6 +190,16 @@ async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
   }
 
   // ④ ガチャ結果を確認
+    if (!fs.existsSync(BUMP_GACHA_COUNT_FILE)) {
+    writeJsonFile(BUMP_GACHA_COUNT_FILE, {
+      count: 0,
+      star2Total: 0,
+      star3Total: 0,
+      star4PickupTotal: 0,
+      star4ConstantTotal: 0
+    });
+    specialMessage = 'あけましておめでとうございます！年が変わったのでBumpガチャのカウントをリセットしました。';
+  }
   const bumpGachaCount = readJsonFile(BUMP_GACHA_COUNT_FILE);
   if (!bumpGachaCount.count) bumpGachaCount.count = 0;
   bumpGachaCount.count += 1;

@@ -186,56 +186,37 @@ async function handleAnnouncementText(text) {
   }
 
   // 放送局のメッセージにマッチしたら Discordイベント作成
-  const match = text.match(/(\d{1,2})月(\d{1,2})日(\d{1,2})時(\d{1,2})分より「プロセカ放送局#(\d+)」を生配信/);
-  if (match) {
-    const [, monthStr, dayStr, hourStr, minuteStr, numberStr] = match;
-    const month = Number(monthStr);
-    const day = Number(dayStr);
-    const hour = Number(hourStr);
-    const minute = Number(minuteStr);
-    const number = Number(numberStr);
-
-    const now = new Date();
-    const year = (now.getMonth() + 1 > month) ? now.getFullYear() + 1 : now.getFullYear();
-
-    const jstStart = new Date(year, month - 1, day, hour, minute);
-    const utcStart = new Date(jstStart.getTime() - 9 * 60 * 60 * 1000);
-    const utcEnd = new Date(utcStart.getTime() + 2 * 60 * 60 * 1000);
-
-    for (const guildId of guildIds) {
-      if (client.guilds.cache.has(guildId)) {
-        const guild = await client.guilds.fetch(guildId);
-        const eventChannelId = eventChannelIds[guildIds.indexOf(guildId)];
-        if (!eventChannelId) {
-            console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
-            continue;
-        }
-        const event = await guild.scheduledEvents.create({
-          name: `プロセカ放送局#${number}`,
-          scheduledStartTime: utcStart,
-          scheduledEndTime: utcEnd,
-          privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-          entityType: GuildScheduledEventEntityType.Voice,
-          channel: eventChannelId,
-          description: '「プロセカ放送局」の生配信イベントです。',
-        });
-
-        for (let i = 0; i < channelIds.length; i++) {
-          const channelId = channelIds[i];
-          const channel = client.channels.cache.get(channelId);
-          if (channel) {
-            const roleId = roleIds[i] || '0';
-            const mention = roleId !== '0' ? `<@&${roleId}>` : '@here';
-            await channel.send(`📢 Discordイベントを作成しました！\n${event.url}\n\n${mention}`);
-          }
-        }
-
-        console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
+  for (let i = 0; i < guildIds.length; i++) {
+    const guildId = guildIds[i];
+    if (client.guilds.cache.has(guildId)) {
+      const guild = await client.guilds.fetch(guildId);
+      const eventChannelId = eventChannelIds[i];
+      if (!eventChannelId) {
+          console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
+          continue;
       }
+      const event = await guild.scheduledEvents.create({
+        name: `プロセカ放送局#${number}`,
+        scheduledStartTime: utcStart,
+        scheduledEndTime: utcEnd,
+        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+        entityType: GuildScheduledEventEntityType.Voice,
+        channel: eventChannelId,
+        description: '「プロセカ放送局」の生配信イベントです。',
+      });
+
+      const channelId = channelIds[i];
+      const channel = client.channels.cache.get(channelId);
+      if (channel) {
+        const roleId = roleIds[i] || '0';
+        const mention = roleId !== '0' ? `<@&${roleId}>` : '@here';
+        await channel.send(`📢 Discordイベントを作成しました！\n${event.url}\n\n${mention}`);
+      }
+
+      console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
     }
   }
 }
-
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
@@ -376,7 +357,7 @@ client.on('interactionCreate', async interaction => {
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (message.mentions.has(client.user) && message.attachments.size > 0) {
+  if (message.mentions.users.has(client.user) && message.attachments.size > 0) {
     const isDebug = message.content.toLowerCase().includes('debug');
     for (const attachment of message.attachments.values()) {
       if (attachment.contentType && attachment.contentType.startsWith('image')) {

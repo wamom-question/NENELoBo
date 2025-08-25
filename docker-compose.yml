@@ -10,7 +10,7 @@ services:
     networks:
       - botnet
     restart: always
-
+    
   python_result_calc:
     build:
       context: ./python-result-calc

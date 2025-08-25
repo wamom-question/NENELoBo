@@ -11,6 +11,7 @@ DATA_URL = "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/m
 # loggingの設定
 log = logging.getLogger('werkzeug')
 logging.basicConfig(level=logging.ERROR)  # エラーログのみ出力
+log.setLevel(logging.ERROR)  # ERROR 以上のみ出力
 
 # 前回のチェック時刻を取得
 def get_last_check_time():
