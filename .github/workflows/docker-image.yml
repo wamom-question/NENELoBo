@@ -18,7 +18,6 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    # Build & push bot
     - name: Build & push bot
       uses: docker/build-push-action@v5
       with:
@@ -26,10 +25,9 @@ jobs:
         file: ./bot/Dockerfile
         push: true
         tags: |
-          ghcr.io/wamom-question/NENELoBo/bot:latest
-          ghcr.io/wamom-question/NENELoBo/bot:${{ github.sha }}
+          ghcr.io/wamom-question/nenelobo/bot:latest
+          ghcr.io/wamom-question/nenelobo/bot:${{ github.sha }}
 
-    # 他のサービスも同様に追加
     - name: Build & push python_result_calc
       uses: docker/build-push-action@v5
       with:
@@ -37,5 +35,25 @@ jobs:
         file: ./python-result-calc/Dockerfile
         push: true
         tags: |
-          ghcr.io/wamom-question/NENELoBo/python_result_calc:latest
-          ghcr.io/wamom-question/NENELoBo/python_result_calc:${{ github.sha }}
+          ghcr.io/wamom-question/nenelobo/python_result_calc:latest
+          ghcr.io/wamom-question/nenelobo/python_result_calc:${{ github.sha }}
+
+    - name: Build & push python_announce_fetcher
+      uses: docker/build-push-action@v5
+      with:
+        context: ./python_announce_fetcher
+        file: ./python_announce_fetcher/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/wamom-question/nenelobo/python_announce_fetcher:latest
+          ghcr.io/wamom-question/nenelobo/python_announce_fetcher:${{ github.sha }}
+
+    - name: Build & push result-calc-stats
+      uses: docker/build-push-action@v5
+      with:
+        context: ./result-calc-stats
+        file: ./result-calc-stats/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/wamom-question/nenelobo/result-calc-stats:latest
+          ghcr.io/wamom-question/nenelobo/result-calc-stats:${{ github.sha }}
