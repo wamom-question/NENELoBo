@@ -1,0 +1,41 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # Docker login
+    - name: Log in to GHCR
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Build & push bot
+    - name: Build & push bot
+      uses: docker/build-push-action@v5
+      with:
+        context: ./bot
+        file: ./bot/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/wamom-question/NENELoBo/bot:latest
+          ghcr.io/wamom-question/NENELoBo/bot:${{ github.sha }}
+
+    # 他のサービスも同様に追加
+    - name: Build & push python_result_calc
+      uses: docker/build-push-action@v5
+      with:
+        context: ./python-result-calc
+        file: ./python-result-calc/Dockerfile
+        push: true
+        tags: |
+          ghcr.io/wamom-question/NENELoBo/python_result_calc:latest
+          ghcr.io/wamom-question/NENELoBo/python_result_calc:${{ github.sha }}
