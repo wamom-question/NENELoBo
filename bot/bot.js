@@ -357,7 +357,7 @@ client.on('interactionCreate', async interaction => {
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (message.mentions.users.has(client.user) && message.attachments.size > 0) {
+  if (message.mentions.has(client.user, { ignoreEveryone: true }) && message.attachments.size > 0) {
     const isDebug = message.content.toLowerCase().includes('debug');
     for (const attachment of message.attachments.values()) {
       if (attachment.contentType && attachment.contentType.startsWith('image')) {
