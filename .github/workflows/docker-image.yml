@@ -2,58 +2,32 @@ name: Build and Push Docker Images
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
 
 jobs:
-  docker:
+  build-and-push:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service: [bot, python-announce-fetcher, python-result-calc, result-calc-stats]
+
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    # Docker login
-    - name: Log in to GHCR
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
-    - name: Build & push bot
-      uses: docker/build-push-action@v5
-      with:
-        context: ./bot
-        file: ./bot/Dockerfile
-        push: true
-        tags: |
-          ghcr.io/wamom-question/nenelobo/bot:latest
-          ghcr.io/wamom-question/nenelobo/bot:${{ github.sha }}
-
-    - name: Build & push python_result_calc
-      uses: docker/build-push-action@v5
-      with:
-        context: ./python-result-calc
-        file: ./python-result-calc/Dockerfile
-        push: true
-        tags: |
-          ghcr.io/wamom-question/nenelobo/python_result_calc:latest
-          ghcr.io/wamom-question/nenelobo/python_result_calc:${{ github.sha }}
-
-    - name: Build & push python_announce_fetcher
-      uses: docker/build-push-action@v5
-      with:
-        context: ./python_announce_fetcher
-        file: ./python_announce_fetcher/Dockerfile
-        push: true
-        tags: |
-          ghcr.io/wamom-question/nenelobo/python_announce_fetcher:latest
-          ghcr.io/wamom-question/nenelobo/python_announce_fetcher:${{ github.sha }}
-
-    - name: Build & push result-calc-stats
-      uses: docker/build-push-action@v5
-      with:
-        context: ./result-calc-stats
-        file: ./result-calc-stats/Dockerfile
-        push: true
-        tags: |
-          ghcr.io/wamom-question/nenelobo/result-calc-stats:latest
-          ghcr.io/wamom-question/nenelobo/result-calc-stats:${{ github.sha }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./\${{ matrix.service }}
+          file: ./\${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ghcr.io/${{ secrets.GHCR_USERNAME }}/\${{ matrix.service }}:latest
