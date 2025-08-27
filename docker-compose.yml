@@ -1,38 +1,32 @@
 services:
   bot:
-    build: ./bot
+    image: ghcr.io/wamom-question/nenelobo/bot:latest
     volumes:
       - ./data:/app/data
     env_file: .env
     depends_on:
-      - python_result_calc
-      - python_announce_fetcher
+      - python-result-calc
+      - python-announce-fetcher
     networks:
       - botnet
     restart: always
     
-  python_result_calc:
-    build:
-      context: ./python-result-calc
-      dockerfile: Dockerfile
+  python-result-calc:
+    image: ghcr.io/wamom-question/nenelobo/python-result-calc:latest
     volumes:
       - ./data:/app/data
     networks:
       - botnet
     restart: always
 
-  python_announce_fetcher:
-    build:
-      context: ./python-announce-fetcher
-      dockerfile: Dockerfile
+  python-announce-fetcher:
+    image: ghcr.io/wamom-question/nenelobo/python-announce-fetcher:latest
     networks:
       - botnet
     restart: always
 
   result-calc-stats:
-    build:
-      context: ./result-calc-stats
-      dockerfile: Dockerfile
+    image: ghcr.io/wamom-question/nenelobo/result-calc-stats:latest
     volumes:
       - ./data:/app/data
     ports:
