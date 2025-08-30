@@ -101,7 +101,7 @@ const rest = new REST({ version: '10' }).setToken(token);
 })();
 
 // Botが起動したらログ出力
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log('Bot is online!');
   // お知らせ送信を毎分スケジューリング
   const now = new Date();

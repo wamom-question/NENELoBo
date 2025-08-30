@@ -11,7 +11,6 @@ import logging
 import glob
 import time
 import threading
-from queue import PriorityQueue
 import sqlite3
 import struct
 import numpy as np
@@ -32,23 +31,6 @@ for _ in range(3):
         time.sleep(5)
 else:
     raise RuntimeError("EasyOCR initialization failed after multiple attempts")
-
-# 優先度付きキュー
-ocr_queue = PriorityQueue()
-
-# ワーカースレッド
-def worker():
-    while True:
-        priority, task = ocr_queue.get()
-        try:
-            process_ocr_task(task)
-        except Exception as e:
-            logging.error("OCR処理中にエラー:", exc_info=e)
-        finally:
-            ocr_queue.task_done()
-
-# ワーカースレッド起動
-threading.Thread(target=worker, daemon=True).start()
 
 def convert_numpy(obj):
     if isinstance(obj, np.integer):
@@ -598,9 +580,12 @@ def get_easyocr_reader():
         logging.error(f"EasyOCRの初期化に失敗しました: {e}")
         raise
 
-def process_ocr_task(task):
+@app.route('/ocr', methods=['POST'])
+def ocr_endpoint():
     label_regions = []
     logging.info("ラベル領域初期化")
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
     file = request.files['image']
     debug = request.form.get('debug', '0') == '1'
     in_memory_file = BytesIO()
@@ -796,24 +781,6 @@ def process_ocr_task(task):
         # シンプル下処理で認識できた場合は上記で枠線画像を返す（summaryは空）
         response['debug_summary'] = 'simple preprocess fallback'
     return jsonify(response)
-
-@app.route('/ocr', methods=['POST'])
-def ocr_endpoint():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image uploaded'}), 400
-    file = request.files['image']
-    debug = request.form.get('debug', '0') == '1'
-    in_memory_file = BytesIO()
-    file.save(in_memory_file)
-    data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
-    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-
-    # 優先度判定: 内部からのリクエストは0（高）、外部は1（低）
-    internal = request.remote_addr.startswith('172.') or request.remote_addr.startswith('10.')
-    priority = 0 if internal else 1
-
-    ocr_queue.put((priority, {'img': img, 'debug': debug}))
-    return jsonify({'status': 'queued'})
 
 if __name__ == '__main__':
     # EasyOCRモデルの初期化を遅延実行に変更
