@@ -30,7 +30,7 @@ const priorityQueue = [];
 const normalQueue = [];
 
 // OCR APIエンドポイント
-const OCR_API_URL = 'http://python-result-calc:5000/ocr';
+const OCR_API_URL = 'http://python-result-calc:53744/ocr';
 
 // クライアントの作成
 const client = new Client({

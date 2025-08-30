@@ -11,6 +11,7 @@ import logging
 import glob
 import time
 import threading
+from queue import PriorityQueue
 import sqlite3
 import struct
 import numpy as np
@@ -31,6 +32,23 @@ for _ in range(3):
         time.sleep(5)
 else:
     raise RuntimeError("EasyOCR initialization failed after multiple attempts")
+
+# 優先度付きキュー
+ocr_queue = PriorityQueue()
+
+# ワーカースレッド
+def worker():
+    while True:
+        priority, task = ocr_queue.get()
+        try:
+            process_ocr_task(task)
+        except Exception as e:
+            logging.error("OCR処理中にエラー:", exc_info=e)
+        finally:
+            ocr_queue.task_done()
+
+# ワーカースレッド起動
+threading.Thread(target=worker, daemon=True).start()
 
 def convert_numpy(obj):
     if isinstance(obj, np.integer):
@@ -573,7 +591,6 @@ def to_float_safe(value, scale=1.0):
         return int.from_bytes(value, byteorder='little') / scale
     return float(value) / scale
 
-# EasyOCRモデルを必要時に初期化する関数
 def get_easyocr_reader():
     try:
         return easyocr.Reader(['en'], gpu=False)
@@ -581,8 +598,7 @@ def get_easyocr_reader():
         logging.error(f"EasyOCRの初期化に失敗しました: {e}")
         raise
 
-@app.route('/ocr', methods=['POST'])
-def ocr_endpoint():
+def process_ocr_task(task):
     label_regions = []
     logging.info("ラベル領域初期化")
     if 'image' not in request.files:
@@ -783,6 +799,24 @@ def ocr_endpoint():
         response['debug_summary'] = 'simple preprocess fallback'
     return jsonify(response)
 
+@app.route('/ocr', methods=['POST'])
+def ocr_endpoint():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
+    file = request.files['image']
+    debug = request.form.get('debug', '0') == '1'
+    in_memory_file = BytesIO()
+    file.save(in_memory_file)
+    data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+    # 優先度判定: 内部からのリクエストは0（高）、外部は1（低）
+    internal = request.remote_addr.startswith('172.') or request.remote_addr.startswith('10.')
+    priority = 0 if internal else 1
+
+    ocr_queue.put((priority, {'img': img, 'debug': debug}))
+    return jsonify({'status': 'queued'})
+
 if __name__ == '__main__':
     # EasyOCRモデルの初期化を遅延実行に変更
     logging.info("[Startup] OCR APIサーバー起動")
@@ -792,4 +826,4 @@ if __name__ == '__main__':
     logging.info("[Startup] ウォームアップ処理完了")
     start_warmup_thread()
     logging.info("[Startup] ウォームアップスレッド開始")
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=53744)

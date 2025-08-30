@@ -15,6 +15,8 @@ services:
     image: ghcr.io/wamom-question/nenelobo/python-result-calc:latest
     volumes:
       - ./data:/app/data
+    ports:
+      - "53744:53744"
     networks:
       - botnet
     restart: always
