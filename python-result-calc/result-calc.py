@@ -601,8 +601,6 @@ def get_easyocr_reader():
 def process_ocr_task(task):
     label_regions = []
     logging.info("ラベル領域初期化")
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image uploaded'}), 400
     file = request.files['image']
     debug = request.form.get('debug', '0') == '1'
     in_memory_file = BytesIO()

@@ -1,0 +1,19 @@
+{
+  "name": "discord-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot with slash commands",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "discord.js": "^14.7.1",
+    "dotenv": "^16.0.0",
+    "node-fetch": "^3.3.1",
+    "luxon": "^3.3.0",
+    "form-data": "^4.0.0"
+  },
+  "author": "",
+  "license": "ISC"
+}

@@ -7,19 +7,37 @@ DISCORD_TOKEN=
 # BotユーザーID
 CLIENT_ID=
 
+# mini-Botのトークン
+DISCORD_TOKEN=
+
+# mini-BotユーザーID
+CLIENT_ID=
+
 # サーバーID
 GUILD_ID=
 
-# お知らせ通知するチャンネルID
+# 常に添付画像をOCR処理するチャンネルID
+OCR_ALWAYS_CHANNEL_ID=
+
+# メインBumpサーバーID（複数サーバーのBump管理は実装してない）
+BUMP_SURVEIL_GUILD=
+
+# メインBumpチャンネルID（bumpが送信されたか判定に使用）
+MAIN_BUMP_CHANNEL_ID=
+
+# ゲーム内お知らせをするチャンネルID(,で複数入力可)
 ANNOUNCEMENT_CHANNEL_ID=
+
+# ゲーム内お知らせをするチャンネルID(ANNOUNCEMENT_CHANNEL_IDと同じ数入力。0にしたら@hereになる)
+ANNOUNCEMENT_ROLE_IDS=
+
+#生放送イベントを同時視聴するボイスチャンネルID(ANNOUNCEMENT_CHANNEL_IDと同じ数入力。)
+EVENT_CHANNEL_ID=
 
 # ガチャ機能用のカスタム絵文字ID
 EMOJI_STAR2=
 EMOJI_STAR3=
 EMOJI_STAR4=
-
-# メインBumpチャンネルID（例: bumpが送信されたか判定に使用）
-MAIN_BUMP_CHANNEL_ID=
 
 # bump通知を送るスレッドID（時間帯・平日/休日）
 THREAD_WEEKDAY_0=
@@ -39,9 +57,6 @@ THREAD_HOLIDAY_12=
 THREAD_HOLIDAY_15=
 THREAD_HOLIDAY_18=
 THREAD_HOLIDAY_22=
-
-# 常に添付画像をOCR処理するチャンネルID
-OCR_ALWAYS_CHANNEL_ID=
 
 # スコア機能用のカスタム絵文字ID
 EMOJI_0_1=
