@@ -3,19 +3,30 @@ dotenv.config();  // .envファイルを読み込む
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
 import FormData from 'form-data';
+import { REST } from '@discordjs/rest';
+import { Routes, SlashCommandBuilder, EmbedBuilder, Client, GatewayIntentBits, Colors } from 'discord.js';
 
 // 環境変数から設定を読み込む
 const token = process.env.MINI_DISCORD_TOKEN;
 const clientId = process.env.MINI_CLIENT_ID;
 
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
 // OCR APIエンドポイント
 const OCR_API_URL = 'https://nenelobo-calc.wamom.f5.si/ocr';
 
+const rest = new REST({ version: '10' }).setToken(token);
 // スラッシュコマンドの定義
 const commands = [
   new SlashCommandBuilder()
     .setName('ping')
-    .setDescription('Botの情報を返します。')
+    .setDescription('Botのpingを返します。')
     .toJSON(),
   new SlashCommandBuilder()
     .setName('help')
@@ -30,7 +41,7 @@ const commands = [
   console.log('✅ グローバルコマンドを登録しました。');
 
 // Botが起動したらログ出力
-client.once('ready', async () => {
+client.once('clientReady', async () => {
   console.log('Bot is online!');
 });
 
@@ -38,7 +49,7 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
   if (interaction.isChatInputCommand()) {
-  if (interaction.commandName === 'pitg') {
+  if (interaction.commandName === 'ping') {
     const ping = client.ws.ping;
 
     // 外部テキストファイルを読み込む
@@ -55,7 +66,7 @@ client.on('interactionCreate', async interaction => {
 
     // Embedメッセージとして送信
     const embed = new EmbedBuilder()
-      .setColor('Blue')
+      .setColor(Colors.Blue)
       .setTitle('📶 Ping 結果')
       .setDescription(replacedText)
       .setTimestamp();
@@ -63,13 +74,21 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({ embeds: [embed] });
   } else if (interaction.commandName === 'help') {
     // 外部テキストファイルを読み込む
-    let helpText;
+    let rawText;
     try {
-      helpText = await fs.readFile('/app/data/help_message.txt', 'utf-8');
+      rawText = await fs.readFile('/app/data/help_message.txt', 'utf-8');
     } catch (err) {
       console.error('help_message.txt の読み込みに失敗:', err);
-      helpText = 'ヘルプメッセージの読み込みに失敗しました。'; // fallback
     }
+
+    // Embedメッセージとして送信
+    const embed = new EmbedBuilder()
+      .setColor(Colors.Green)
+      .setTitle('こんにちは！私はNENELoBo(Mini)です🤖')
+      .setDescription(rawText)
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
   }
 }});
 
@@ -94,7 +113,9 @@ client.on('messageCreate', async (message) => {
             body: form,
             headers: form.getHeaders()
           });
-          const result = await ocrRes.json();
+          const text = await ocrRes.text();
+          console.log(text);  // ここで HTML が返っていないことを確認
+          const result = JSON.parse(text);
 
           if (result && result.results && result.results.length > 0) {
             if (result.results.length >= 2) {
