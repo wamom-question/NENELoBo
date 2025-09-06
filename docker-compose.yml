@@ -10,17 +10,6 @@ services:
     networks:
       - botnet
     restart: always
-
-  # bot-mini:
-  #   image: ghcr.io/wamom-question/nenelobo/bot-mini:latest
-  #   volumes:
-  #     - ./data:/app/data
-  #   env_file: .env
-  #   depends_on:
-  #     - python-result-calc
-  #     - python-announce-fetcher
-  #     - bot
-  #   restart: always
     
   python-result-calc:
     image: ghcr.io/wamom-question/nenelobo/python-result-calc:latest

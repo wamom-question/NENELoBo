@@ -26,9 +26,10 @@ const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python-announce
 const ocrAlwaysChannelIds = process.env.OCR_ALWAYS_CHANNEL_ID
   ? process.env.OCR_ALWAYS_CHANNEL_ID.split(',').map(id => id.trim())
   : [];
-const priorityQueue = [];
-const normalQueue = [];
-
+const spoilerChannelId = process.env.SPOILER_CHANNEL_ID
+const spoilerRoleId = process.env.SPOILER_ROLE_ID
+const spoilerGuildId = process.env.SPOILER_GUILD_ID
+const spoilerNoticeChannelId = process.env.SPOILER_NOTICE_CHANNEL_ID
 // OCR APIエンドポイント
 const OCR_API_URL = 'http://python-result-calc:53744/ocr';
 
@@ -61,11 +62,6 @@ const commands = [
         .setRequired(true)
     )
     .toJSON(),
-  // メッセージコンテキストメニューコマンドを追加
-  {
-    name: 'リアクション',
-    type: 3 // 3 = MESSAGE
-  }
 ];
 
 // REST APIクライアントを作成してコマンド登録を実施
@@ -169,6 +165,18 @@ const roleIds = process.env.ANNOUNCEMENT_ROLE_IDS
 async function handleAnnouncementText(text) {
   if (!text) return; // null や空文字なら即終了
 
+  const match = text.match(/(\d+)月(\d+)日(\d+)時(\d+)分より「プロセカ放送局#(\d+)」/);
+  if (!match) {
+    // 放送局のお知らせでなければイベント作成はスキップ
+    return;
+  }
+  const [, month, day, hour, minute, number] = match;
+  const year = new Date().getFullYear();
+  const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+  const utcStart = startDate.toISOString();
+  const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+  const utcEnd = endDate.toISOString();
+
   for (let i = 0; i < channelIds.length; i++) {
     const channelId = channelIds[i];
     const channel = client.channels.cache.get(channelId);
@@ -216,7 +224,47 @@ async function handleAnnouncementText(text) {
       console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
     }
   }
+
+  // イベント開催で特定ロールを誰も付与していない状態にする
+  const eventMatch = text.match(/イベント「(.+?)」開催！/);
+  if (eventMatch) {
+    const eventName = eventMatch[1];
+
+    const guild = await client.guilds.fetch(spoilerGuildId);
+    const spoilerNoticeChannel = guild.channels.cache.get(spoilerNoticeChannelId);
+    const spoilerChannel = guild.channels.cache.get(spoilerChannelId);
+    const role = guild.roles.cache.get(spoilerRoleId);
+
+    if (spoilerNoticeChannel) {
+      await spoilerNoticeChannel.send("ネタバレロールをリセットします");
+    }
+
+    if (role) {
+        await Promise.all(role.members.map(member => member.roles.remove(role)));
+    }
+
+    if (spoilerNoticeChannel) {
+      await spoilerNoticeChannel.send("ネタバレチャンネルを更新します");
+    }
+    if (spoilerChannel) {
+      await spoilerChannel.send(`--- ${eventName} ---`);
+      await spoilerChannel.setName(`❗｜ネタバレ-${eventName}`);
+    }
+
+    if (spoilerNoticeChannel) {
+      await spoilerNoticeChannel.send("ネタバレロールを更新します");
+    }
+    if (role) {
+      await role.setName(`${eventName}-ネタバレOK`);
+    }
+
+    if (spoilerNoticeChannel) {
+      await spoilerNoticeChannel.send(`ネタバレチャンネル・ロールの更新が完了しました。\n 「${eventName}」のイベントストーリーを完読した方は再度ロールをつけてください`);
+    }
+  }
+
 }
+
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);

@@ -1,0 +1,11 @@
+services:
+ bot-mini:
+    image: ghcr.io/wamom-question/nenelobo/bot-mini:latest
+    volumes:
+      - ./data:/app/data
+    env_file: .env
+  #  depends_on:
+  #    - python-result-calc
+  #    - python-announce-fetcher
+  #    - bot
+    restart: always

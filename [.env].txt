@@ -34,6 +34,12 @@ ANNOUNCEMENT_ROLE_IDS=
 #生放送イベントを同時視聴するボイスチャンネルID(ANNOUNCEMENT_CHANNEL_IDと同じ数入力。)
 EVENT_CHANNEL_ID=
 
+# ネタバレチャンネルID
+SPOILER_CHANNEL_ID=
+
+# ネタバレチャンネルを見れたりするロールID(イベント開催時に剥奪)
+SPOILER_ROLE_ID=
+
 # ガチャ機能用のカスタム絵文字ID
 EMOJI_STAR2=
 EMOJI_STAR3=
