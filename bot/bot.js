@@ -162,20 +162,9 @@ const roleIds = process.env.ANNOUNCEMENT_ROLE_IDS
   ? process.env.ANNOUNCEMENT_ROLE_IDS.split(',').map(id => id.trim())
   : [];
 
-async function handleAnnouncementText(text) {
-  if (!text) return; // null や空文字なら即終了
 
-  const match = text.match(/(\d+)月(\d+)日(\d+)時(\d+)分より「プロセカ放送局#(\d+)」/);
-  if (!match) {
-    // 放送局のお知らせでなければイベント作成はスキップ
-    return;
-  }
-  const [, month, day, hour, minute, number] = match;
-  const year = new Date().getFullYear();
-  const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
-  const utcStart = startDate.toISOString();
-  const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-  const utcEnd = endDate.toISOString();
+async function handleAnnouncementText(text) {
+  if (!text) return;
 
   for (let i = 0; i < channelIds.length; i++) {
     const channelId = channelIds[i];
@@ -193,35 +182,46 @@ async function handleAnnouncementText(text) {
     await channel.send(`${text}\n\n${mention}`);
   }
 
-  // 放送局のメッセージにマッチしたら Discordイベント作成
-  for (let i = 0; i < guildIds.length; i++) {
-    const guildId = guildIds[i];
-    if (client.guilds.cache.has(guildId)) {
-      const guild = await client.guilds.fetch(guildId);
-      const eventChannelId = eventChannelIds[i];
-      if (!eventChannelId) {
-          console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
-          continue;
-      }
-      const event = await guild.scheduledEvents.create({
-        name: `プロセカ放送局#${number}`,
-        scheduledStartTime: utcStart,
-        scheduledEndTime: utcEnd,
-        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-        entityType: GuildScheduledEventEntityType.Voice,
-        channel: eventChannelId,
-        description: '「プロセカ放送局」の生配信イベントです。',
-      });
 
-      const channelId = channelIds[i];
-      const channel = client.channels.cache.get(channelId);
-      if (channel) {
-        const roleId = roleIds[i] || '0';
-        const mention = roleId !== '0' ? `<@&${roleId}>` : '@here';
-        await channel.send(`📢 Discordイベントを作成しました！\n${event.url}\n\n${mention}`);
-      }
+  const match = text.match(/(\d+)月(\d+)日(\d+)時(\d+)分より「プロセカ放送局#(\d+)」/);
+  let number, utcStart, utcEnd;
+  if (match) {
+    [, month, day, hour, minute, number] = match;
+    const year = new Date().getFullYear();
+    const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+    utcStart = startDate.toISOString();
+    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+    utcEnd = endDate.toISOString();
+    // 放送局のメッセージにマッチしたら Discordイベント作成
+    for (let i = 0; i < guildIds.length; i++) {
+      const guildId = guildIds[i];
+      if (client.guilds.cache.has(guildId)) {
+        const guild = await client.guilds.fetch(guildId);
+        const eventChannelId = eventChannelIds[i];
+        if (!eventChannelId) {
+            console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
+            continue;
+        }
+        const event = await guild.scheduledEvents.create({
+          name: `プロセカ放送局#${number}`,
+          scheduledStartTime: utcStart,
+          scheduledEndTime: utcEnd,
+          privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+          entityType: GuildScheduledEventEntityType.Voice,
+          channel: eventChannelId,
+          description: '「プロセカ放送局」の生配信イベントです。',
+        });
 
-      console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
+        const channelId = channelIds[i];
+        const channel = client.channels.cache.get(channelId);
+        if (channel) {
+          const roleId = roleIds[i] || '0';
+          const mention = roleId !== '0' ? `<@&${roleId}>` : '@here';
+          await channel.send(`📢 Discordイベントを作成しました！\n${event.url}\n\n${mention}`);
+        }
+
+        console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
+      }
     }
   }
 
@@ -240,7 +240,7 @@ async function handleAnnouncementText(text) {
     }
 
     if (role) {
-        await Promise.all(role.members.map(member => member.roles.remove(role)));
+        Promise.all(role.members.map(m => m.roles.remove(role)));
     }
 
     if (spoilerNoticeChannel) {
@@ -264,6 +264,7 @@ async function handleAnnouncementText(text) {
   }
 
 }
+
 
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
