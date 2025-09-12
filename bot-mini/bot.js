@@ -30,8 +30,12 @@ const commands = [
     .toJSON(),
   new SlashCommandBuilder()
     .setName('help')
-    .setDescription('このBatの使い方')
+    .setDescription('このBotの使い方')
     .toJSON(),
+  new SlashCommandBuilder()
+    .setName('report')
+    .setDescription('不具合報告や認識結果が間違っていた場合はこちらから')
+    .toJSON()
 ];
 
   await rest.put(
@@ -90,7 +94,15 @@ client.on('interactionCreate', async interaction => {
 
     await interaction.reply({ embeds: [embed] });
   }
-}});
+  else if (interaction.commandName === 'report') {
+    const embed = new EmbedBuilder()
+      .setColor(Colors.Orange)
+      .setTitle('不具合報告・認識結果が間違っていた場合はこちらから')
+      .setDescription('[不具合報告フォーム](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header) (Googleフォーム)')
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+}}});
 
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
@@ -182,13 +194,7 @@ client.on('messageCreate', async (message) => {
               // 1人だけなら従来通り
               let reply = result.results.map(player => {
                 if (player.error) {
-                  if (player.error.startsWith('数値変換に失敗')) {
-                    return `Player_${player.player}: 認識失敗（数値変換エラー）`;
-                  } else if (player.error === 'スコア認識に失敗') {
-                    return `Player_${player.player}: 認識失敗（スコア認識エラー）`;
-                  } else {
-                    return `Player_${player.player}: 認識失敗 (${player.error})`;
-                  }
+                    return `Player_${player.player}: 認識失敗 (${player.error})  [エラー報告](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header)をお願いします。`;
                 } else {
                   return [
                     `### Player_${player.player} 認識結果`,
@@ -207,7 +213,7 @@ client.on('messageCreate', async (message) => {
               await message.reply(reply);
             }
           } else {
-            await message.reply('APIレスポンスにエラーが発生しました。管理者にご連絡ください。');
+            await message.reply('APIレスポンスにエラーが発生しました。[エラー報告](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header)をお願いします。');
             console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
 
@@ -242,7 +248,7 @@ client.on('messageCreate', async (message) => {
             }
           }
         } catch (err) {
-          await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
+          await message.reply('OCR処理中にエラーが発生しました。[エラー報告](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header)をお願いします。');
           console.error(err);
         }
       }
