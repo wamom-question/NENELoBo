@@ -183,34 +183,36 @@ async function handleAnnouncementText(text) {
   }
 
 
-  const match = text.match(/(\d+)月(\d+)日(\d+)時(\d+)分より「プロセカ放送局#(\d+)」/);
-  let number, utcStart, utcEnd;
-  if (match) {
-    [, month, day, hour, minute, number] = match;
-    const year = new Date().getFullYear();
-    const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
-    utcStart = startDate.toISOString();
-    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-    utcEnd = endDate.toISOString();
-    // 放送局のメッセージにマッチしたら Discordイベント作成
-    for (let i = 0; i < guildIds.length; i++) {
-      const guildId = guildIds[i];
-      if (client.guilds.cache.has(guildId)) {
-        const guild = await client.guilds.fetch(guildId);
-        const eventChannelId = eventChannelIds[i];
-        if (!eventChannelId) {
-            console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
-            continue;
-        }
-        const event = await guild.scheduledEvents.create({
-          name: `プロセカ放送局#${number}`,
-          scheduledStartTime: utcStart,
-          scheduledEndTime: utcEnd,
-          privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-          entityType: GuildScheduledEventEntityType.Voice,
-          channel: eventChannelId,
-          description: '「プロセカ放送局」の生配信イベントです。',
-        });
+  const match = text.match(/(\d+)月(\d+)日(\d+)時(\d+)分より「(プロセカ放送局[^」]+)」/);
+let name, utcStart, utcEnd;
+if (match) {
+  const [, month, day, hour, minute, title] = match;
+  name = title; // ← これで「プロセカ放送局 5周年スペシャル」や「プロセカ放送局#23」が入る
+  const year = new Date().getFullYear();
+  const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+  utcStart = startDate.toISOString();
+  const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+  utcEnd = endDate.toISOString();
+
+  for (let i = 0; i < guildIds.length; i++) {
+    const guildId = guildIds[i];
+    if (client.guilds.cache.has(guildId)) {
+      const guild = await client.guilds.fetch(guildId);
+      const eventChannelId = eventChannelIds[i];
+      if (!eventChannelId) {
+        console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
+        continue;
+      }
+      const event = await guild.scheduledEvents.create({
+        name, // 「プロセカ放送局 5周年スペシャル」や「プロセカ放送局#23」
+        scheduledStartTime: utcStart,
+        scheduledEndTime: utcEnd,
+        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+        entityType: GuildScheduledEventEntityType.Voice,
+        channel: eventChannelId,
+        description: '「プロセカ放送局」の生配信イベントです。',
+      });
+    }
 
         const channelId = channelIds[i];
         const channel = client.channels.cache.get(channelId);
@@ -491,13 +493,7 @@ client.on('messageCreate', async (message) => {
               // 1人だけなら従来通り
               let reply = result.results.map(player => {
                 if (player.error) {
-                  if (player.error.startsWith('数値変換に失敗')) {
-                    return `Player_${player.player}: 認識失敗（数値変換エラー）`;
-                  } else if (player.error === 'スコア認識に失敗') {
-                    return `Player_${player.player}: 認識失敗（スコア認識エラー）`;
-                  } else {
                     return `Player_${player.player}: 認識失敗 (${player.error})`;
-                  }
                 } else {
                   return [
                     `### Player_${player.player} 認識結果`,
