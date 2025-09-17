@@ -182,37 +182,35 @@ async function handleAnnouncementText(text) {
     await channel.send(`${text}\n\n${mention}`);
   }
 
-
   const match = text.match(/(\d+)月(\d+)日(\d+)時(\d+)分より「(プロセカ放送局[^」]+)」/);
-let name, utcStart, utcEnd;
-if (match) {
-  const [, month, day, hour, minute, title] = match;
-  name = title; // ← これで「プロセカ放送局 5周年スペシャル」や「プロセカ放送局#23」が入る
-  const year = new Date().getFullYear();
-  const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
-  utcStart = startDate.toISOString();
-  const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
-  utcEnd = endDate.toISOString();
+  let name, utcStart, utcEnd;
+  if (match) {
+    const [, month, day, hour, minute, title] = match;
+    name = title; // イベント名
+    const year = new Date().getFullYear();
+    const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+    utcStart = startDate.toISOString();
+    const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+    utcEnd = endDate.toISOString();
 
-  for (let i = 0; i < guildIds.length; i++) {
-    const guildId = guildIds[i];
-    if (client.guilds.cache.has(guildId)) {
-      const guild = await client.guilds.fetch(guildId);
-      const eventChannelId = eventChannelIds[i];
-      if (!eventChannelId) {
-        console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
-        continue;
-      }
-      const event = await guild.scheduledEvents.create({
-        name, // 「プロセカ放送局 5周年スペシャル」や「プロセカ放送局#23」
-        scheduledStartTime: utcStart,
-        scheduledEndTime: utcEnd,
-        privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
-        entityType: GuildScheduledEventEntityType.Voice,
-        channel: eventChannelId,
-        description: '「プロセカ放送局」の生配信イベントです。',
-      });
-    }
+    for (let i = 0; i < guildIds.length; i++) {
+      const guildId = guildIds[i];
+      if (client.guilds.cache.has(guildId)) {
+        const guild = await client.guilds.fetch(guildId);
+        const eventChannelId = eventChannelIds[i];
+        if (!eventChannelId) {
+          console.warn(`⚠️ GUILD_ID=${guildId} に対応するEVENT_CHANNEL_IDが見つかりません。スキップします。`);
+          continue;
+        }
+        const event = await guild.scheduledEvents.create({
+          name,
+          scheduledStartTime: utcStart,
+          scheduledEndTime: utcEnd,
+          privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
+          entityType: GuildScheduledEventEntityType.Voice,
+          channel: eventChannelId,
+          description: '「プロセカ放送局」の生配信イベントです。',
+        });
 
         const channelId = channelIds[i];
         const channel = client.channels.cache.get(channelId);
@@ -222,12 +220,12 @@ if (match) {
           await channel.send(`📢 Discordイベントを作成しました！\n${event.url}\n\n${mention}`);
         }
 
-        console.log(`✅ Discordイベント「プロセカ放送局#${number}」を作成しました。`);
+        console.log(`✅ Discordイベント「${name}」を作成しました。`);
       }
     }
   }
 
-  // イベント開催で特定ロールを誰も付与していない状態にする
+  // イベント開催で特定ロールをリセット
   const eventMatch = text.match(/イベント「(.+?)」開催！/);
   if (eventMatch) {
     const eventName = eventMatch[1];
@@ -242,7 +240,7 @@ if (match) {
     }
 
     if (role) {
-        Promise.all(role.members.map(m => m.roles.remove(role)));
+      await Promise.all(role.members.map(m => m.roles.remove(role)));
     }
 
     if (spoilerNoticeChannel) {
@@ -261,10 +259,10 @@ if (match) {
     }
 
     if (spoilerNoticeChannel) {
-      await spoilerNoticeChannel.send(`ネタバレチャンネル・ロールの更新が完了しました。\n 「${eventName}」のイベントストーリーを完読した方は再度ロールをつけてください`);
+      await spoilerNoticeChannel.send(`ネタバレチャンネル・ロールの更新が完了しました。\n「${eventName}」のイベントストーリーを完読した方は再度ロールをつけてください`);
+    }
   }
 }
-
 
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
@@ -469,7 +467,7 @@ client.on('messageCreate', async (message) => {
               for (let i = 0; i < scores.length; i++) {
                 const { idx, score, weight } = scores[i];
                 const player = `Player_${idx}`;
-                if (i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
+                if i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
                   // 同点なら順位維持（③）
                   rankLines.push(`## ${currentRank}位    ${player}（同率）`);
                 } else {
