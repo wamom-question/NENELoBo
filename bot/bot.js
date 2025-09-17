@@ -467,7 +467,7 @@ client.on('messageCreate', async (message) => {
               for (let i = 0; i < scores.length; i++) {
                 const { idx, score, weight } = scores[i];
                 const player = `Player_${idx}`;
-                if i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
+                if (i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
                   // 同点なら順位維持（③）
                   rankLines.push(`## ${currentRank}位    ${player}（同率）`);
                 } else {
