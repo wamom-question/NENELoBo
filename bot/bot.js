@@ -240,7 +240,10 @@ async function handleAnnouncementText(text) {
     }
 
     if (role) {
-      await Promise.all(role.members.map(m => m.roles.remove(role)));
+      // 全メンバーを取得し、ロール所持者のみロールを剥奪
+      const allMembers = await guild.members.fetch();
+      const membersWithRole = allMembers.filter(m => m.roles.cache.has(role.id));
+      await Promise.all(membersWithRole.map(m => m.roles.remove(role)));
     }
 
     if (spoilerNoticeChannel) {
