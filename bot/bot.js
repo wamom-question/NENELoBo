@@ -30,6 +30,8 @@ const spoilerChannelId = process.env.SPOILER_CHANNEL_ID
 const spoilerRoleId = process.env.SPOILER_ROLE_ID
 const spoilerGuildId = process.env.SPOILER_GUILD_ID
 const spoilerNoticeChannelId = process.env.SPOILER_NOTICE_CHANNEL_ID
+const mysekai_guildId = process.env.MYSEKAI_GUILD_ID
+const mysekai_titleChannelId = process.env.MYSEKAI_TITLE_CHANNEL
 // OCR APIエンドポイント
 const OCR_API_URL = 'http://python-result-calc:53744/ocr';
 
@@ -63,10 +65,18 @@ const commands = [
     ),
     new SlashCommandBuilder()
     .setName('eventset')
-    .setDescription('イベント用のネタバレロールをリセットします')
+    .setDescription('イベント用のネタバレロールをセットします')
     .addStringOption(option =>
       option.setName('name')
         .setDescription('イベント名')
+        .setRequired(true)
+    ),
+    new SlashCommandBuilder()
+    .setName('mysekai-eventset')
+    .setDescription('マイセカイコンテスト用のチャンネルをセットします')
+    .addStringOption(option =>
+      option.setName('name')
+        .setDescription('テーマ')
         .setRequired(true)
     )
     .toJSON(),
@@ -272,6 +282,20 @@ async function handleAnnouncementText(text) {
       await spoilerNoticeChannel.send(`ネタバレチャンネル・ロールの更新が完了しました。\n「${eventName}」のイベントストーリーを完読した方は再度ロールをつけてください`);
     }
   }
+
+
+  // マイセカイ百景コンテスント開催で特定ロールをリセット
+  const mysekai_eventMatch = text.match(/マイセカイ百景「(.+?)」開催！/);
+  if (mysekai_eventMatch) {
+    const mysekai_eventName = mysekai_eventMatch[1];
+
+    const mysekai_guild = await client.guilds.fetch(mysekai_guildId);
+    const mysekai_titleChannel = mysekai_guild.channels.cache.get(mysekai_titleChannelId);
+
+    if (mysekai_titleChannel) {
+      await mysekai_titleChannel.send(`--- ${mysekai_eventName} ---`);
+    }
+  }
 }
 
 // コマンド実行時の処理
@@ -422,6 +446,19 @@ client.on('interactionCreate', async interaction => {
     await resetSpoilerRoleAndChannel(eventName);
 
     await interaction.reply(`イベント「${eventName}」のリセット処理を実行しました。`);
+  } else if (interaction.commandName === 'mysekai-eventset') {
+    // 管理者権限チェック
+    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      await interaction.reply({ content: 'このコマンドは管理者のみが実行できます。', ephemeral: true });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const eventName = interaction.options.getString('name');
+
+    // 「イベント開催で特定ロールをリセット」の処理を関数化して呼ぶ
+    await setMysekaiChannel(eventName);
+
+    await interaction.reply(`マイセカイ百景「${eventName}」のコンテスト開始処理を実行しました。`);
   }
 }});
 
@@ -457,6 +494,17 @@ async function resetSpoilerRoleAndChannel(eventName) {
 
   if (spoilerNoticeChannel) {
     await spoilerNoticeChannel.send(`ネタバレチャンネル・ロールの更新が完了しました。\n「${eventName}」のイベントストーリーを完読した方は再度ロールをつけてください`);
+  }
+}
+
+async function setMysekaiChannel(eventName) {
+  const mysekai_eventName = eventName;
+
+  const mysekai_guild = await client.guilds.fetch(mysekai_guildId);
+  const mysekai_titleChannel = mysekai_guild.channels.cache.get(mysekai_titleChannelId);
+
+  if (mysekai_titleChannel) {
+    await mysekai_titleChannel.send(`--- ${mysekai_eventName} ---`);
   }
 }
 
