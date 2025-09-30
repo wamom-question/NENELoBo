@@ -40,6 +40,15 @@ SPOILER_CHANNEL_ID=
 # ネタバレチャンネルを見れたりするロールID(イベント開催時に剥奪)
 SPOILER_ROLE_ID=
 
+# マイセカイコンテスト宣伝機能の通知を送るチャンネルID
+MYSEKAI_GUILD_ID=
+
+# マイセカイコンテスト宣伝機能の通知を送るチャンネルID
+MYSEKAI_TITLE_CHANNEL=
+
+# 不具合起きた時用のメンション先のユーザーID（大抵の場合、あなたのユーザーID）
+MENTION_USER_USUALLY_YOU=
+
 # ガチャ機能用のカスタム絵文字ID
 EMOJI_STAR2=
 EMOJI_STAR3=
