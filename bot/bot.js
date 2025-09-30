@@ -5,7 +5,7 @@ const eventChannelIds = process.env.EVENT_CHANNEL_ID
   ? process.env.EVENT_CHANNEL_ID.split(',').map(id => id.trim())
   : [];
 
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel,PermissionsBitField } from 'discord.js';
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
 import { setupBumpNoticeHandler, handleNextBumpCommand, setupNextBumpOnStartup } from './BumpNotice.js';
