@@ -279,6 +279,7 @@ client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
   if (interaction.isChatInputCommand()) {
   if (interaction.commandName === 'nenelobo') {
+      await interaction.deferReply({ ephemeral: true });
     const ping = client.ws.ping;
 
     // 外部テキストファイルを読み込む
@@ -414,7 +415,7 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: 'このコマンドは管理者のみが実行できます。', ephemeral: true });
       return;
     }
-
+    await interaction.deferReply({ ephemeral: true });
     const eventName = interaction.options.getString('name');
 
     // 「イベント開催で特定ロールをリセット」の処理を関数化して呼ぶ
