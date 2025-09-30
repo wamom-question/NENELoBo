@@ -438,21 +438,22 @@ client.on('interactionCreate', async interaction => {
     // 「イベント開催で特定ロールをリセット」の処理を関数化して呼ぶ
     await resetSpoilerRoleAndChannel(eventName);
 
-    await interaction.reply(`イベント「${eventName}」のリセット処理を実行しました。`);
+    await interaction.editReply(`イベント「${eventName}」のリセット処理を実行しました。`);
   } else if (interaction.commandName === 'mysekai-eventset') {
-    // 管理者権限チェック
-    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-      await interaction.reply({ content: 'このコマンドは管理者のみが実行できます。', ephemeral: true });
-      return;
-    }
-    await interaction.deferReply({ ephemeral: true });
-    const eventName = interaction.options.getString('name');
-
-    // 「イベント開催で特定ロールをリセット」の処理を関数化して呼ぶ
-    await setMysekaiChannel(eventName);
-
-    await interaction.reply(`マイセカイ百景「${eventName}」のコンテスト開始処理を実行しました。`);
+  // 管理者権限チェック
+  if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    await interaction.reply({ content: 'このコマンドは管理者のみが実行できます。', ephemeral: true });
+    return;
   }
+
+  const eventName = interaction.options.getString('name');
+
+  await interaction.deferReply({ ephemeral: true });
+
+  await setMysekaiChannel(eventName);
+
+  await interaction.editReply(`マイセカイ百景「${eventName}」のコンテスト開始処理を実行しました。`);
+}
 }});
 
 async function resetSpoilerRoleAndChannel(eventName) {
