@@ -249,8 +249,7 @@ async function handleAnnouncementText(text) {
 
     if (role) {
       // 全メンバーを取得し、ロール所持者のみロールを剥奪
-      const allMembers = await guild.members.fetch();
-      const membersWithRole = allMembers.filter(m => m.roles.cache.has(role.id));
+        const membersWithRole = role.members;
       await Promise.all(membersWithRole.map(m => m.roles.remove(role)));
     }
 
@@ -436,8 +435,7 @@ async function resetSpoilerRoleAndChannel(eventName) {
   }
 
   if (role) {
-    const allMembers = await guild.members.fetch();
-    const membersWithRole = allMembers.filter(m => m.roles.cache.has(role.id));
+    const membersWithRole = role.members;
     await Promise.all(membersWithRole.map(m => m.roles.remove(role)));
   }
 
