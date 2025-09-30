@@ -60,6 +60,14 @@ const commands = [
           { name: '100回', value: 100 }
         )
         .setRequired(true)
+    ),
+    new SlashCommandBuilder()
+    .setName('eventset')
+    .setDescription('イベント用のネタバレロールをリセットします')
+    .addStringOption(option =>
+      option.setName('name')
+        .setDescription('イベント名')
+        .setRequired(true)
     )
     .toJSON(),
 ];
@@ -400,9 +408,58 @@ client.on('interactionCreate', async interaction => {
         if (summary.length > 0) {
           await interaction.followUp(summary.join('\n'));
         }
-      }
+      } 
+  } else if (interaction.commandName === 'eventset') {
+    // 管理者権限チェック
+    if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      await interaction.reply({ content: 'このコマンドは管理者のみが実行できます。', ephemeral: true });
+      return;
+    }
+
+    const eventName = interaction.options.getString('name');
+
+    // 「イベント開催で特定ロールをリセット」の処理を関数化して呼ぶ
+    await resetSpoilerRoleAndChannel(eventName);
+
+    await interaction.reply(`イベント「${eventName}」のリセット処理を実行しました。`);
   }
 }});
+
+async function resetSpoilerRoleAndChannel(eventName) {
+  const guild = await client.guilds.fetch(spoilerGuildId);
+  const spoilerNoticeChannel = guild.channels.cache.get(spoilerNoticeChannelId);
+  const spoilerChannel = guild.channels.cache.get(spoilerChannelId);
+  const role = guild.roles.cache.get(spoilerRoleId);
+
+  if (spoilerNoticeChannel) {
+    await spoilerNoticeChannel.send("ネタバレロールをリセットします");
+  }
+
+  if (role) {
+    const allMembers = await guild.members.fetch();
+    const membersWithRole = allMembers.filter(m => m.roles.cache.has(role.id));
+    await Promise.all(membersWithRole.map(m => m.roles.remove(role)));
+  }
+
+  if (spoilerNoticeChannel) {
+    await spoilerNoticeChannel.send("ネタバレチャンネルを更新します");
+  }
+  if (spoilerChannel) {
+    await spoilerChannel.send(`--- ${eventName} ---`);
+    await spoilerChannel.setName(`❗｜ネタバレ-${eventName}`);
+  }
+
+  if (spoilerNoticeChannel) {
+    await spoilerNoticeChannel.send("ネタバレロールを更新します");
+  }
+  if (role) {
+    await role.setName(`${eventName}-ネタバレOK`);
+  }
+
+  if (spoilerNoticeChannel) {
+    await spoilerNoticeChannel.send(`ネタバレチャンネル・ロールの更新が完了しました。\n「${eventName}」のイベントストーリーを完読した方は再度ロールをつけてください`);
+  }
+}
 
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
