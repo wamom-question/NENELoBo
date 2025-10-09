@@ -610,7 +610,7 @@ client.on('messageCreate', async (message) => {
             }
           } else {
             await message.react('<:ocr_error_api:1389800393332101311>');
-            await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+            await message.channel.send(`<@${mentionDeveloper}>`);
             console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
 
@@ -646,7 +646,7 @@ client.on('messageCreate', async (message) => {
           }
         } catch (err) {
           await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
-          await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+          await message.channel.send(`<@${mentionDeveloper}>`);
           console.error(err);
         }
       }
@@ -691,13 +691,13 @@ client.on('messageCreate', async (message) => {
           if (player.error) {
             if (player.error.startsWith('数値変換に失敗')) {
               await message.channel.send('<:ocr_error_convert:1389568868493561967>');
-              await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+              await message.channel.send(`<@${mentionDeveloper}>`);
             } else if (player.error === 'スコア認識に失敗') {
               await message.channel.send('<:ocr_error_score:1389573918825775145>');
-              await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+              await message.channel.send(`<@${mentionDeveloper}>`);
             } else {
               await message.channel.send('<:ocr_error:1389568660401684500>');
-              await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+              await message.channel.send(`<@${mentionDeveloper}>`);
             }
           } else {
             let reply = `-# 認識結果 ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`;
@@ -717,7 +717,7 @@ client.on('messageCreate', async (message) => {
           }
         } else {
           await message.channel.send('<:ocr_error_api:1389800393332101311>');
-          await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+          await message.channel.send(`<@${mentionDeveloper}>`);
         }
       }
       return;
@@ -751,14 +751,14 @@ client.on('messageCreate', async (message) => {
               if (player.error) {
                 if (player.error.startsWith('数値変換に失敗')) {
                   await message.react('<:ocr_error_convert:1389568868493561967>');
-                  await message.channel.send('${MENTION_USER_USUALLY_YOU} ');
+                  await message.channel.send('${mentionDeveloper} ');
                 } else if (player.error === 'スコア認識に失敗') {
                   await message.react('<:ocr_error_score:1389573918825775145>');
-                  await message.channel.send('${MENTION_USER_USUALLY_YOU} ');
+                  await message.channel.send('${mentionDeveloper} ');
                 } else {
                   // その他のエラー
                   await message.react('<:ocr_error:1389568660401684500>');
-                  await message.channel.send('${MENTION_USER_USUALLY_YOU} ');
+                  await message.channel.send('${mentionDeveloper} ');
                 }
               } else {
                 // スコアを左から右へ桁ごとに分解し、各桁・数字に対応するカスタム絵文字IDでリアクション
@@ -783,12 +783,12 @@ client.on('messageCreate', async (message) => {
             }
           } else {
             await message.react('<:ocr_error_api:1389800393332101311>');
-            await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+            await message.channel.send(`<@${mentionDeveloper}>`);
             console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
         } catch (err) {
           await message.reply('OCRが起動していない可能性があります。しばらくしてから再度お試しください。');
-          await message.channel.send('<@${MENTION_USER_USUALLY_YOU}>');
+          await message.channel.send(`<@${mentionDeveloper}>`);
           console.error(err);
         }
       }
