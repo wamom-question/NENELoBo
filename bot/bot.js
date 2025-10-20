@@ -199,7 +199,7 @@ async function handleAnnouncementText(text) {
     const [, month, day, hour, minute, title] = match;
     name = title; // イベント名
     const year = new Date().getFullYear();
-    const startDate = new Date(year, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+    const startDate = new Date(Date.UTC(year, parseInt(month) - 1, parseInt(day), parseInt(hour) - 9, parseInt(minute)));
     utcStart = startDate.toISOString();
     const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
     utcEnd = endDate.toISOString();
