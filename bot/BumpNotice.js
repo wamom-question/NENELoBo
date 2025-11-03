@@ -539,6 +539,13 @@ async function updateCountdown(countdownMessage, bumpFromMain, bumpTime, guildId
       if (!nextBumpData.notified) {
         await sendNextBumpNotification(client, bumpTime, guildId);
       }
+      try {
+        if (countdownMessage && typeof countdownMessage.delete === 'function') {
+          await countdownMessage.delete();
+        }
+      } catch (err) {
+        console.warn('⚠️ カウントダウンメッセージの削除に失敗しました:', err);
+      }
       return;
     }
 
