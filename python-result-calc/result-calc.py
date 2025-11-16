@@ -661,7 +661,9 @@ def ocr_endpoint():
         # レベル（数字）は難易度と最も y が近いもの
         if numeric_candidates:
             numeric_candidates.sort(key=lambda x: abs(x[1] - diff_y))
-            song_level = numeric_candidates[0][0]
+            numeric_text = numeric_candidates[0][0]
+            numbers = re.findall(r"\d+", numeric_text)
+            song_level = numbers[-1] if numbers else None
 
         # 曲名は難易度と最も y が遠いもの
         if other_texts:
