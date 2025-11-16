@@ -777,7 +777,9 @@ client.on('messageCreate', async (message) => {
               }
               // replyは従来通り
               let reply = [
-                `-# 認識結果 ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`,
+                `認識結果`,
+                `-# ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`,
+                `-# 「${player.song_title}  ${player.song_difficulty} （Lv. ${player.song_level}） `,
               ].join('\n');
               await message.reply(reply);
             }

@@ -594,6 +594,85 @@ def ocr_endpoint():
     img = cv2.imdecode(data, cv2.IMREAD_COLOR)
 
     logging.info(f"画像読み込み成功: img.shape={img.shape if img is not None else 'None'}")
+    song_h, song_w = img.shape[:2]
+    song_1left = img[:, :song_w // 2]
+    song_2h_left = song_1left.shape[0]
+    song_3top_block = song_1left[:song_2h_left // 6, :]
+    song_4h_top_block = song_3top_block.shape[0]
+    song_5top_under_block = song_3top_block[song_4h_top_block // 2:, :]
+
+    labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
+    reader = easyocr.Reader(['en'])
+
+    results = reader.readtext(song_5top_under_block)
+
+    found = []
+    for (bbox, text, conf) in results:
+        text_up = text.upper()
+        if text_up in labels:
+            # bbox = [ [x1,y1], [x2,y2], [x3,y3], [x4,y4] ]
+            x_left = min(p[0] for p in bbox)
+            found.append((text_up, x_left, conf))
+
+    # 最も確度の高いラベルを取る
+    if found:
+        found.sort(key=lambda x: x[2], reverse=True)
+        label, x_local, conf = found[0]
+
+        # song_5top_under_block の原点が song_3top_block 由来であることを反映
+        # song_3top_block は song_1left の [0 : song_2h_left//6, :]
+        # song_1left は img の [:, :song_w//2]
+        x_global = x_local  # 左半分の中での X → 元画像でも同じ
+
+        # x_local を基準に song_3top_block を右端まで切り抜く
+        song_3top_block = song_3top_block[:, x_local:]
+
+            # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
+    reader_jp_en = easyocr.Reader(['ja', 'en'])
+    results_full = reader_jp_en.readtext(song_3top_block)
+
+    target_labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
+
+    difficulty_info = None
+    numeric_candidates = []
+    other_texts = []
+
+    for (bbox, text, conf) in results_full:
+        y_center = sum(p[1] for p in bbox) / 4
+        text_up = text.upper()
+
+        if text_up in target_labels:
+            difficulty_info = (text_up, y_center, bbox)
+        else:
+            # 数字ラベル候補
+            if re.fullmatch(r"\d+(\.\d+)?", text.strip()):
+                numeric_candidates.append((text.strip(), y_center, bbox))
+            else:
+                other_texts.append((text.strip(), y_center, bbox))
+
+    song_difficulty = None
+    song_level = None
+    song_title = None
+
+    if difficulty_info:
+        _, diff_y, _ = difficulty_info
+        song_difficulty = difficulty_info[0]
+
+        # レベル（数字）は難易度と最も y が近いもの
+        if numeric_candidates:
+            numeric_candidates.sort(key=lambda x: abs(x[1] - diff_y))
+            song_level = numeric_candidates[0][0]
+
+        # 曲名は難易度と最も y が遠いもの
+        if other_texts:
+            other_texts.sort(key=lambda x: abs(x[1] - diff_y), reverse=True)
+            song_title = other_texts[0][0]
+        
+    else:
+        label, x_local, x_global = None, None, None
+        song_difficulty = None
+        song_level = None
+        song_title = None
 
     # 画像のアスペクト比を調整して中央切り抜き
     h, w = img.shape[:2]
@@ -739,6 +818,9 @@ def ocr_endpoint():
                         }
 
                     all_player_scores.append({
+                        'song_difficulty': song_difficulty,
+                        'song_level': song_level,
+                        'song_title': song_title,
                         'player': player_number,
                         'perfect': perfect_val,
                         'great': great_val,
