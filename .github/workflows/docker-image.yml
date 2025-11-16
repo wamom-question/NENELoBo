@@ -11,7 +11,7 @@ jobs:
 
     strategy:
       matrix:
-        service: [bot, python-announce-fetcher, python-result-calc, result-calc-stats, bot-mini]
+        service: [bot, python-announce-fetcher, python-result-calc, bot-mini]
 
     steps:
       - name: Checkout repository
