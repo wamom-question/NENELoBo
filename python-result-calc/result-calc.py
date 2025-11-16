@@ -622,10 +622,10 @@ def ocr_endpoint():
         # song_5top_under_block の原点が song_3top_block 由来であることを反映
         # song_3top_block は song_1left の [0 : song_2h_left//6, :]
         # song_1left は img の [:, :song_w//2]
-        x_global = x_local  # 左半分の中での X → 元画像でも同じ
+        x_global = x_local - 50  # 左半分の中での X → 元画像でも同じ
 
         # x_local を基準に song_3top_block を右端まで切り抜く
-        song_3top_block = song_3top_block[:, x_local:]
+        song_3top_block = song_3top_block[:, x_global:]
 
             # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
     reader_jp_en = easyocr.Reader(['ja', 'en'])
