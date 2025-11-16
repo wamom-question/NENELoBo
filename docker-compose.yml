@@ -27,15 +27,5 @@ services:
       - botnet
     restart: always
 
-  result-calc-stats:
-    image: ghcr.io/wamom-question/nenelobo/result-calc-stats:latest
-    volumes:
-      - ./data:/app/data
-    ports:
-    - "53743:53743"
-    networks:
-      - botnet
-    restart: always
-
 networks:
   botnet:

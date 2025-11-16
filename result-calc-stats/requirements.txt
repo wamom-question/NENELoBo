@@ -1,4 +1,0 @@
-streamlit
-pandas
-streamlit-autorefresh
-altair
