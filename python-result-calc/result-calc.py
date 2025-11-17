@@ -671,24 +671,23 @@ def ocr_endpoint():
         if other_texts:
             other_texts.sort(key=lambda x: abs(x[1] - diff_y), reverse=True)
 
-                titles = []
+        titles = []
+        json_file_path = '/app/assets/musics.json'
 
-                json_file_path = '/app/assets/musics.json'
+        # JSONファイルを読み込む
+        with open(json_file_path, encoding='utf-8') as f:
+            data = json.load(f)
+            titles = [song["title"] for song in data] 
+        
+        best_title = None
+        best_distance = float("inf")
 
-                # JSONファイルを読み込む
-                with open(json_file_path, encoding='utf-8') as f:
-                    data = json.load(f)
-                    titles = [song["title"] for song in data] 
-                
-                best_title = None
-                best_distance = float("inf")
-
-                for title in titles:
-                    dist = Levenshtein.distance(target, title)  # 通常のレーベンシュタイン距離
-                    if dist < best_distance:
-                        song_title_distance = dist
-                        song_title = title
-                        logging.info("曲名: {} (精度: {})".format(song_title, song_title_distance))
+        for title in titles:
+            dist = Levenshtein.distance(target, title)  # 通常のレーベンシュタイン距離
+            if dist < best_distance:
+                song_title_distance = dist
+                song_title = title
+                logging.info("曲名: {} (精度: {})".format(song_title, song_title_distance))
         
     else:
         label, x_local, x_global = None, None, None
