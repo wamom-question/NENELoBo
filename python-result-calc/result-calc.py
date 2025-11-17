@@ -102,11 +102,11 @@ def warmup_loop():
 
         # 成功レコードの数を確認して間隔を調整
         try:
-                with sqlite_conn('/app/data/warmup_success_params.sqlite', timeout=10) as conn:
-                    with sqlite_cursor(conn) as c:
-                        c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
-                        row = c.fetchone()
-                        success_count = row[0] if row else 0
+            with sqlite_conn('/app/data/warmup_success_params.sqlite', timeout=10) as conn:
+                with sqlite_cursor(conn) as c:
+                    c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
+                    row = c.fetchone()
+                    success_count = row[0] if row else 0
             except sqlite3.Error:
                 success_count = 0
 
