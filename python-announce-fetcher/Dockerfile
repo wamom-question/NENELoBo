@@ -3,10 +3,6 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-# 依存取得のため go.mod/go.sum だけ先にコピー
-COPY go.mod go.sum ./
-RUN go mod download
-
 # アプリ本体をコピー
 COPY . .
 
