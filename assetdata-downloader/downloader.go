@@ -14,7 +14,7 @@ func main() {
     }
 
 	// ディレクトリの作成
-	dir := "/app/data/downloads"
+	dir := "/app/assets"
 	os.MkdirAll(dir, os.ModePerm)
 
 	for _, url := range urls {
