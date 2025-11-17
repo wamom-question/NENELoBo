@@ -22,7 +22,7 @@ const channelIds = process.env.ANNOUNCEMENT_CHANNEL_ID
 const guildIds = process.env.GUILD_ID
   ? process.env.GUILD_ID.split(',').map(id => id.trim())
   : [];
-const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://python-announce-fetcher:5000/announcements'; // PythonのAPIエンドポイント
+const ANNOUNCEMENT_API = process.env.ANNOUNCEMENT_API || 'http://announce-fetcher:5000/announcements'; // PythonのAPIエンドポイント
 const ocrAlwaysChannelIds = process.env.OCR_ALWAYS_CHANNEL_ID
   ? process.env.OCR_ALWAYS_CHANNEL_ID.split(',').map(id => id.trim())
   : [];
