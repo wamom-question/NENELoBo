@@ -46,18 +46,18 @@ def convert_numpy(obj):
 
 
 @contextmanager
-def sqlite_conn(path, timeout=10, row_factory=None):
+def sqlite_conn('/app/data/warmup_success_params.sqlite', timeout=10, row_factory=None):
     """Context manager for sqlite3 connection with timeout and optional row_factory.
     Ensures connection is closed even on error and logs any connection errors.
     """
     conn = None
     try:
-        conn = sqlite3.connect(path, timeout=timeout)
+        conn = sqlite3.connect('/app/data/warmup_success_params.sqlite', timeout=timeout)
         if row_factory:
             conn.row_factory = row_factory
         yield conn
     except sqlite3.Error as e:
-        logging.warning(f"SQLite connection error ({path}): {e}")
+        logging.warning(f"SQLite connection error ('/app/data/warmup_success_params.sqlite'): {e}")
         raise
     finally:
         if conn:
@@ -717,6 +717,7 @@ def ocr_endpoint():
         # 曲名は難易度と最も y が遠いもの
         if other_texts:
             other_texts.sort(key=lambda x: abs(x[1] - diff_y), reverse=True)
+            song_text = other_texts[0][0]
 
         titles = []
         json_file_path = '/app/assets/musics.json'
@@ -730,7 +731,7 @@ def ocr_endpoint():
         best_distance = float("inf")
 
         for title in titles:
-            dist = Levenshtein.distance(target, title)  # 通常のレーベンシュタイン距離
+            dist = Levenshtein.distance(song_text, title)  # 通常のレーベンシュタイン距離
             if dist < best_distance:
                 song_title_distance = dist
                 song_title = title
