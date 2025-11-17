@@ -1,5 +1,6 @@
 .env
 ._*
 data/*
+assets/*
 .gitignore
 .DS_Store

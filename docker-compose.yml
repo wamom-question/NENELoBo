@@ -15,17 +15,27 @@ services:
     image: ghcr.io/wamom-question/nenelobo/python-result-calc:latest
     volumes:
       - ./data:/app/data
+      - ./assets:/app/assets
     ports:
       - "53744:53744"
     networks:
       - botnet
     restart: always
 
-  python-announce-fetcher:
-    image: ghcr.io/wamom-question/nenelobo/python-announce-fetcher:latest
+  announce-fetcher:
+    image: ghcr.io/wamom-question/nenelobo/announce-fetcher:latest
     networks:
       - botnet
     restart: always
+
+  assetdata-downloader:
+    image: ghcr.io/wamom-question/nenelobo/assetdata-downloader:latest
+    volumes:
+      - ./assets:/app/assets
+    command: ["sh", "-c", "mkdir -p /app/data && /app/downloader"]
+    deploy:
+      restart_policy:
+        condition: on-failure
 
 networks:
   botnet:
