@@ -102,13 +102,14 @@ def warmup_loop():
 
         # 成功レコードの数を確認して間隔を調整
         try:
-            with sqlite_conn('/app/data/warmup_success_params.sqlite', timeout=10) as conn:
-                with sqlite_cursor(conn) as c:
+            with sqlite3.connect('/app/data/warmup_success_params.sqlite', timeout=10) as conn:
+                with conn.cursor() as c:  # sqlite_cursor(conn) が関数の形で持っている場合
                     c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
                     row = c.fetchone()
                     success_count = row[0] if row else 0
-            except sqlite3.Error:
-                success_count = 0
+        except sqlite3.Error as e:
+            print(f"SQLite error: {e}")  # エラーが発生した場合のメッセージ出力
+            success_count = 0  # エラー発生時は成功カウントを0に設定
 
         # 学習の進み具合に応じて sleep 間隔を変化させる（最大5分まで）
         min_interval = 60      # 秒
