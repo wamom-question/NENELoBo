@@ -44,9 +44,6 @@ def convert_numpy(obj):
     return obj
 
 def get_fixed_parameter_candidates():
-    """Return fixed parameter candidates as list of dicts used by OCR paths.
-    Keys match previous DB rows: threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
-    """
     choices = [
         {'threshold': 140, 'blur': 3, 'contrast': 1.2, 'resize': 1.0, 'gaussian_blur': 1, 'use_clahe': 0},
         {'threshold': 170, 'blur': 5, 'contrast': 1.0, 'resize': 0.9, 'gaussian_blur': 3, 'use_clahe': 1},
@@ -69,13 +66,11 @@ def get_fixed_parameter_candidates():
 
 
 def float_to_stored_int(val: float) -> int:
-    """小数を逆順で整数に変換（例: 1.2 → 21）"""
     whole = int(val)
     decimal = int((val - whole) * 10)
     return decimal * 10 + whole
 
 def stored_int_to_float(stored: int) -> float:
-    """保存された整数を小数に戻す（例: 21 → 1.2）"""
     whole = stored % 10
     decimal = stored // 10
     return whole + decimal / 10
