@@ -83,29 +83,13 @@ def start_warmup_thread():
     
 def init_warmup_db(db_path='/app/data/warmup_success_params.sqlite'):
     need_create = not os.path.exists(db_path)
-    conn = sqlite3.connect(db_path)
-    if need_create:
+
+    # タイムアウトを設定して接続
+    conn = sqlite3.connect(db_path, timeout=10)  # 10秒のタイムアウト
+    try:
         cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE warmup_params (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                threshold INTEGER,
-                blur INTEGER,
-                contrast_scaled INTEGER,
-                resize_ratio_scaled INTEGER,
-                gaussian_blur INTEGER,
-                use_clahe INTEGER,
-                success_count INTEGER DEFAULT 0,
-                total_count INTEGER DEFAULT 0,
-                UNIQUE(threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe)
-            )
-        ''')
-        conn.commit()
-    else:
-        # テーブルが存在しない場合に備え、念のためチェック＆作成（任意）
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='warmup_params'")
-        if cursor.fetchone() is None:
+        
+        if need_create:
             cursor.execute('''
                 CREATE TABLE warmup_params (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,7 +105,30 @@ def init_warmup_db(db_path='/app/data/warmup_success_params.sqlite'):
                 )
             ''')
             conn.commit()
-    conn.close()
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='warmup_params'")
+            if cursor.fetchone() is None:
+                cursor.execute('''
+                    CREATE TABLE warmup_params (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        threshold INTEGER,
+                        blur INTEGER,
+                        contrast_scaled INTEGER,
+                        resize_ratio_scaled INTEGER,
+                        gaussian_blur INTEGER,
+                        use_clahe INTEGER,
+                        success_count INTEGER DEFAULT 0,
+                        total_count INTEGER DEFAULT 0,
+                        UNIQUE(threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe)
+                    )
+                ''')
+                conn.commit()
+
+    except sqlite3.Error as e:
+        print(f"SQLite error: {e}")
+    finally:
+        cursor.close()  # 明示的にカーソルを閉じる
+        conn.close()    # 明示的にコネクションを閉じる
 
 def decode_sqlite_int(val):
     if isinstance(val, bytes):
