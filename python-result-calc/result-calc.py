@@ -18,6 +18,7 @@ from io import BytesIO
 from datetime import datetime, timedelta, timezone
 import json
 from rapidfuzz.distance import Levenshtein
+from contextlib import contextmanager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +44,57 @@ def convert_numpy(obj):
         return obj.tolist()
     return obj
 
+
+@contextmanager
+def sqlite_conn(path, timeout=10, row_factory=None):
+    """Context manager for sqlite3 connection with timeout and optional row_factory.
+    Ensures connection is closed even on error and logs any connection errors.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(path, timeout=timeout)
+        if row_factory:
+            conn.row_factory = row_factory
+        yield conn
+    except sqlite3.Error as e:
+        logging.warning(f"SQLite connection error ({path}): {e}")
+        raise
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@contextmanager
+def sqlite_cursor(conn):
+    """Simple context manager for sqlite cursor to ensure it's closed."""
+    cur = None
+    try:
+        cur = conn.cursor()
+        yield cur
+    finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+
+
+def fetch_warmup_params(param_db_path, timeout=10):
+    """Fetch rows from warmup_params safely. Returns list or empty list on error."""
+    try:
+        with sqlite_conn(param_db_path, timeout=timeout) as conn:
+            with sqlite_cursor(conn) as c:
+                c.execute(
+                    "SELECT id, threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count FROM warmup_params"
+                )
+                return c.fetchall()
+    except sqlite3.Error as e:
+        logging.warning(f"[warmup] SQLite error fetching params: {e}")
+        return []
+
 def warmup_loop():
     base_interval = 5  # 初期は5秒間隔でチェック（必要に応じて）
     while True:
@@ -50,13 +102,13 @@ def warmup_loop():
 
         # 成功レコードの数を確認して間隔を調整
         try:
-            conn = sqlite3.connect('/app/data/warmup_success_params.sqlite')
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
-            success_count = c.fetchone()[0]
-            conn.close()
-        except Exception:
-            success_count = 0
+                with sqlite_conn('/app/data/warmup_success_params.sqlite', timeout=10) as conn:
+                    with sqlite_cursor(conn) as c:
+                        c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
+                        row = c.fetchone()
+                        success_count = row[0] if row else 0
+            except sqlite3.Error:
+                success_count = 0
 
         # 学習の進み具合に応じて sleep 間隔を変化させる（最大5分まで）
         min_interval = 60      # 秒
@@ -137,13 +189,12 @@ def decode_sqlite_int(val):
 
 def get_random_prob(param_db_path='/app/data/warmup_success_params.sqlite'):
     try:
-        conn = sqlite3.connect(param_db_path)
-        c = conn.cursor()
-        # 成功回数2回以上のレコード数を取得
-        c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
-        count = c.fetchone()[0]
-        conn.close()
-    except Exception:
+        with sqlite_conn(param_db_path, timeout=10) as conn:
+            with sqlite_cursor(conn) as c:
+                c.execute("SELECT COUNT(*) FROM warmup_params WHERE success_count >= 2")
+                row = c.fetchone()
+                count = row[0] if row else 0
+    except sqlite3.Error:
         return 1.0
     max_count = 20000
     if count >= max_count:
@@ -248,14 +299,7 @@ def warmup_and_check_all_images():
         success = False
 
         # SQLiteからパラメータ候補を取得
-        if os.path.exists(param_db_path):
-            conn = sqlite3.connect(param_db_path)
-            c = conn.cursor()
-            c.execute("SELECT id, threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count FROM warmup_params")
-            rows = c.fetchall()
-            conn.close()
-        else:
-            rows = []
+        rows = fetch_warmup_params(param_db_path)
 
         # 既存パラメータを元に探索精度を段階的に広げる
         expanded_rows = []
@@ -361,23 +405,22 @@ def warmup_and_check_all_images():
                     success = True
                     # 成功パラメータの挿入（存在しなければ）
                     try:
-                        conn = sqlite3.connect(param_db_path)
-                        c = conn.cursor()
-                        c.execute("""
-                            INSERT OR IGNORE INTO warmup_params (
-                                threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
-                            ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
-                        """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                        c.execute("""
-                            UPDATE warmup_params
-                            SET success_count = success_count + 1,
-                                total_count = total_count + 1
-                            WHERE threshold = ? AND blur = ? AND contrast_scaled = ? AND resize_ratio_scaled = ?
-                            AND gaussian_blur = ? AND use_clahe = ?
-                        """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
+                        with sqlite_conn(param_db_path, timeout=10) as conn:
+                            with sqlite_cursor(conn) as c:
+                                c.execute("""
+                                    INSERT OR IGNORE INTO warmup_params (
+                                        threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
+                                    ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
+                                """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
+                                c.execute("""
+                                    UPDATE warmup_params
+                                    SET success_count = success_count + 1,
+                                        total_count = total_count + 1
+                                    WHERE threshold = ? AND blur = ? AND contrast_scaled = ? AND resize_ratio_scaled = ?
+                                    AND gaussian_blur = ? AND use_clahe = ?
+                                """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
+                            conn.commit()
+                    except sqlite3.Error as e:
                         logging.warning(f"[Warmup] SQLite成功統計保存失敗: {e}")
             except Exception as e:
                 mistake_count += 1
@@ -386,34 +429,32 @@ def warmup_and_check_all_images():
             mistake_count += 1
 
             try:
-                conn = sqlite3.connect(param_db_path)
-                c = conn.cursor()
+                with sqlite_conn(param_db_path, timeout=10) as conn:
+                    with sqlite_cursor(conn) as c:
+                        if chosen_row:
+                            # 既存の行を更新
+                            c.execute("""
+                                INSERT OR IGNORE INTO warmup_params (
+                                    threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
+                                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
+                            """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
 
-                if chosen_row:
-                    # 既存の行を更新
-                    c.execute("""
-                        INSERT OR IGNORE INTO warmup_params (
-                            threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
-                        ) VALUES (?, ?, ?, ?, ?, ?, 0, 0)
-                    """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-
-                    c.execute("""
-                        UPDATE warmup_params
-                        SET total_count = total_count + 1
-                        WHERE threshold = ? AND blur = ? AND contrast_scaled = ? AND resize_ratio_scaled = ?
-                        AND gaussian_blur = ? AND use_clahe = ?
-                    """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-                else:
-                    # 新規ランダム生成パラメータとしてINSERTまたはUPDATE
-                    c.execute("""
-                        INSERT INTO warmup_params (
-                            threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
-                        ) VALUES (?, ?, ?, ?, ?, ?, 0, 1)
-                        ON CONFLICT(threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe) DO UPDATE SET
-                            total_count = total_count + 1
-                    """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
-
-                conn.commit()
+                            c.execute("""
+                                UPDATE warmup_params
+                                SET total_count = total_count + 1
+                                WHERE threshold = ? AND blur = ? AND contrast_scaled = ? AND resize_ratio_scaled = ?
+                                AND gaussian_blur = ? AND use_clahe = ?
+                            """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
+                        else:
+                            # 新規ランダム生成パラメータとしてINSERTまたはUPDATE
+                            c.execute("""
+                                INSERT INTO warmup_params (
+                                    threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe, success_count, total_count
+                                ) VALUES (?, ?, ?, ?, ?, ?, 0, 1)
+                                ON CONFLICT(threshold, blur, contrast_scaled, resize_ratio_scaled, gaussian_blur, use_clahe) DO UPDATE SET
+                                    total_count = total_count + 1
+                            """, (threshold, blur_ksize, contrast_scaled, resize_ratio_scaled, gaussian_blur_ksize, int(use_clahe)))
+                    conn.commit()
                 conn.close()
             except Exception as e:
                 logging.warning(f"[Warmup] SQLite失敗統計更新失敗: {e}")
@@ -459,20 +500,18 @@ def extract_perfect_miss_positions(image):
         saved_params = []
         db_path = '/app/data/warmup_success_params.sqlite'
         try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT *, 
-                    CASE WHEN total_count = 0 THEN 0 ELSE CAST(success_count AS FLOAT)/total_count END AS success_rate 
-                FROM warmup_params
-                WHERE total_count > 0
-                ORDER BY success_rate DESC
-                LIMIT 10
-            """)
-            saved_params = [dict(row) for row in cur.fetchall()]
-            conn.close()
-        except Exception as e:
+            with sqlite_conn(db_path, timeout=10, row_factory=sqlite3.Row) as conn:
+                with sqlite_cursor(conn) as cur:
+                    cur.execute("""
+                        SELECT *, 
+                            CASE WHEN total_count = 0 THEN 0 ELSE CAST(success_count AS FLOAT)/total_count END AS success_rate 
+                        FROM warmup_params
+                        WHERE total_count > 0
+                        ORDER BY success_rate DESC
+                        LIMIT 10
+                    """)
+                    saved_params = [dict(row) for row in cur.fetchall()]
+        except sqlite3.Error as e:
             logging.warning(f"[extract] SQLite 読み込み失敗: {e}")
         return saved_params
 
@@ -751,27 +790,25 @@ def ocr_endpoint():
     saved_params = []
     db_path = '/app/data/warmup_success_params.sqlite'
     try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        # 成功率でソート（total_count=0防止にCASE文）、上位10件取得
-        cur.execute("""
-            SELECT *, 
-                CASE 
-                    WHEN total_count = 0 THEN 0 
-                    ELSE (CAST(success_count AS FLOAT) / total_count) *
-                        (CAST(success_count AS FLOAT) / (success_count + 5))
-                END AS weighted_score
-            FROM warmup_params
-            WHERE total_count > 5
-            ORDER BY weighted_score DESC
-            LIMIT 10
-        """)
-        saved_params = [dict(row) for row in cur.fetchall()]
-        conn.close()
+        with sqlite_conn(db_path, timeout=10, row_factory=sqlite3.Row) as conn:
+            with sqlite_cursor(conn) as cur:
+                # 成功率でソート（total_count=0防止にCASE文）、上位10件取得
+                cur.execute("""
+                    SELECT *, 
+                        CASE 
+                            WHEN total_count = 0 THEN 0 
+                            ELSE (CAST(success_count AS FLOAT) / total_count) *
+                                (CAST(success_count AS FLOAT) / (success_count + 5))
+                        END AS weighted_score
+                    FROM warmup_params
+                    WHERE total_count > 5
+                    ORDER BY weighted_score DESC
+                    LIMIT 10
+                """)
+                saved_params = [dict(row) for row in cur.fetchall()]
         if not saved_params:
             raise ValueError("安定したパラメータが見つかりません")
-    except Exception as e:
+    except (sqlite3.Error, ValueError) as e:
         logging.warning(f"[Retry-OCR] 成功パラメータDB読み込み失敗または未取得: {e}")
         saved_params = []
 
