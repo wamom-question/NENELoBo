@@ -4,3 +4,4 @@ opencv-python-headless
 easyocr
 pytesseract
 numpy<2
+rapidfuzz
