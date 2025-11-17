@@ -13,7 +13,7 @@ RUN apk add --no-cache bash dcron
 COPY . .
 
 # Goアプリケーションをビルド
-RUN go build -o downloader .
+RUN RUN go build -o /app/downloader .
 
 # 実行ステージ
 FROM alpine:latest
@@ -27,5 +27,3 @@ COPY crontab /etc/crontabs/root
 
 # Cronを実行
 CMD ["crond", "-f"]
-
-
