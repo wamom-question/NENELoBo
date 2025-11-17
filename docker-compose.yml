@@ -24,6 +24,8 @@ services:
 
   announce-fetcher:
     image: ghcr.io/wamom-question/nenelobo/announce-fetcher:latest
+    volumes:
+      - ./data:/app/data
     networks:
       - botnet
     restart: always
