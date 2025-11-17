@@ -2,6 +2,9 @@ FROM golang:alpine
 
 WORKDIR /app
 
+COPY go.mod go.sum ./
+RUN go mod download
+
 # 必要なライブラリをインストール
 RUN apk add --no-cache bash dcron
 
