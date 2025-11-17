@@ -821,7 +821,6 @@ def ocr_endpoint():
 
                     all_player_scores.append({
                         'song_difficulty': song_difficulty,
-                        'song_level': song_level,
                         'song_title': song_title,
                         'player': player_number,
                         'perfect': perfect_val,
