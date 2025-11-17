@@ -1,6 +1,8 @@
 package main
 
 import (
+    "log"
+    "fmt"
     "io"
     "net/http"
     "os"
