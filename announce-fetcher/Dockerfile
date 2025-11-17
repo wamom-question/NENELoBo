@@ -13,6 +13,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app .
 
 # チェックファイルを生成
+RUN mkdir -p /app/data
 RUN touch /app/data/last_check.txt  # このファイルを生成
 
 # --- Runtime stage ---
