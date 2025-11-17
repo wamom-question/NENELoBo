@@ -46,13 +46,13 @@ def convert_numpy(obj):
 
 
 @contextmanager
-def sqlite_conn('/app/data/warmup_success_params.sqlite', timeout=10, row_factory=None):
+def sqlite_conn(db_path='/app/data/warmup_success_params.sqlite', timeout=10, row_factory=None):
     """Context manager for sqlite3 connection with timeout and optional row_factory.
     Ensures connection is closed even on error and logs any connection errors.
     """
     conn = None
     try:
-        conn = sqlite3.connect('/app/data/warmup_success_params.sqlite', timeout=timeout)
+        conn = sqlite3.connect(db_path, timeout=timeout)
         if row_factory:
             conn.row_factory = row_factory
         yield conn
