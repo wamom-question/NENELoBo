@@ -2,7 +2,7 @@ FROM golang:alpine
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+COPY go.mod ./
 RUN go mod download
 
 # 必要なライブラリをインストール
