@@ -6,24 +6,21 @@ WORKDIR /app
 COPY go.mod ./
 RUN go mod download
 
-# 残りのソースコードをコピー
+# アプリケーションのソースコードをコピー
 COPY . .
 
-# バイナリをビルド
-RUN CGO_ENABLED=0 GOOS=linux go build -o app .
+# Goアプリケーションをビルド
+RUN go build -o downloader .
 
-# 本番イメージを作成
+# 実行ステージ
 FROM alpine:latest
+WORKDIR /app
 
-# アプリケーションのディレクトリを作成
-RUN mkdir -p /app/assets
+# 必要なライブラリをインストール
+RUN apk add --no-cache ca-certificates
 
-# ビルドしたバイナリをコピー
-COPY --from=builder /app/app /app/
-COPY --from=builder /app/assets /app/assets
+# ビルドされたアプリケーションをコピー
+COPY --from=builder /app/downloader .
 
-# 環境変数を設定
-ENV TZ=Asia/Tokyo
-
-# アプリケーションを指定して実行
-CMD ["/app/app"]
+# 実行コマンドを指定
+CMD ["./downloader"]
