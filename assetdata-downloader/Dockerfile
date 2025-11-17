@@ -13,7 +13,7 @@ RUN apk add --no-cache bash dcron
 COPY . .
 
 # Goアプリケーションをビルド
-RUN RUN go build -o /app/downloader .
+RUN go build -o /app/downloader .
 
 # 実行ステージ
 FROM alpine:latest
