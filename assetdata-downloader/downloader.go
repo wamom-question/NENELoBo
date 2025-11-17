@@ -7,6 +7,7 @@ import (
     "net/http"
     "os"
     "strings"
+    "time"
 )
 
 func main() {
@@ -21,10 +22,20 @@ func main() {
         log.Fatalf("ディレクトリの作成に失敗しました: %v", err)
     }
 
-    for _, url := range urls {
-        filename := dir + "/" + getFileName(url) // フルパスを指定
-        if err := downloadJSON(url, filename); err != nil {
-            log.Printf("ダウンロード失敗: %v", err)
+    for {
+        now := time.Now().In(time.FixedZone("Asia/Tokyo", 9*60*60)) // 日本時間に変換
+        if now.Minute() == 0 { // 分が0のとき
+            for _, url := range urls {
+                filename := dir + "/" + getFileName(url) // フルパスを指定
+                if err := downloadJSON(url, filename); err != nil {
+                    log.Printf("ダウンロード失敗: %v", err)
+                }
+            }
+            // 1時間待機
+            time.Sleep(time.Hour)
+        } else {
+            // 1分待機
+            time.Sleep(time.Minute)
         }
     }
 }

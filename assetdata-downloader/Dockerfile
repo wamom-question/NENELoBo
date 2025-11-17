@@ -7,7 +7,7 @@ COPY go.mod ./
 RUN go mod download
 
 # 必要なライブラリをインストール
-RUN apk add --no-cache bash dcron
+RUN apk add --no-cache bash
 
 # Goのアプリケーションを追加
 COPY . .
@@ -22,8 +22,5 @@ WORKDIR /root/
 # ビルドしたアプリケーションをコピー
 COPY --from=builder /app/downloader .
 
-# crontabを設定
-COPY crontab /etc/crontabs/root
-
-# Cronを実行
-CMD ["crond", "-f"]
+# アプリケーションを実行
+CMD ["./downloader"] 
