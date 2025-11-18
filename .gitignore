@@ -4,3 +4,4 @@ data/*
 assets/*
 .gitignore
 .DS_Store
+docker-compose.yml

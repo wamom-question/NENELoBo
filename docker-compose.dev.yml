@@ -1,0 +1,43 @@
+services:
+  bot:
+    build: bot/.
+    volumes:
+      - ./data:/app/data
+    env_file: .env
+    depends_on:
+      - python-result-calc
+      - announce-fetcher
+    networks:
+      - botnet-dev
+    restart: always
+    
+  python-result-calc:
+    build: python-result-calc/.
+    volumes:
+      - ./data:/app/data
+      - ./assets:/app/assets
+    ports:
+      - "53744:53744"
+    networks:
+      - botnet-dev
+    restart: always
+
+  announce-fetcher:
+    build: announce-fetcher/.
+    volumes:
+      - ./data:/app/data
+    networks:
+      - botnet-dev
+    restart: always
+
+  assetdata-downloader:
+    build: assetdata-downloader/.
+    volumes:
+      - ./assets:/app/assets
+    command: ["sh", "-c", "mkdir -p /app/data && /app/downloader"]
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+networks:
+  botnet-dev:
