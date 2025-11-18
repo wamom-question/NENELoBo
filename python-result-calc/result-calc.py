@@ -314,7 +314,7 @@ def ocr_endpoint():
         # 曲名は難易度と最も y が遠いもの
         if other_texts:
             other_texts.sort(key=lambda x: abs(x[1] - diff_y), reverse=True)
-            song_text = other_texts[0][0]
+            target = other_texts[0][0]
 
         titles = []
         json_file_path = '/app/assets/musics.json'
