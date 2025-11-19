@@ -207,6 +207,7 @@ client.on('messageCreate', async (message) => {
                     '```',
                     '',
                     `## ランクマスコア  ${player.score}`
+                    `-# 「 ${player.song_title} 」  ${player.song_difficulty} `
                   ].join('\n');
                 }
               }).join('\n\n');

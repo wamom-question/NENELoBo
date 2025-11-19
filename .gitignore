@@ -5,3 +5,4 @@ assets/*
 .gitignore
 .DS_Store
 docker-compose.yml
+bot-mini/data
