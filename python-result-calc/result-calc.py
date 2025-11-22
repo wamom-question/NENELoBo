@@ -697,7 +697,6 @@ def ocr_endpoint():
 
         song_title = best_song["title"]
         song_id = best_song["id"]
-
         logging.info("曲名: {} / ID: {} (精度: {})".format(song_title, song_id, best_distance))
              
     else:
