@@ -5,7 +5,7 @@ const eventChannelIds = process.env.EVENT_CHANNEL_ID
   ? process.env.EVENT_CHANNEL_ID.split(',').map(id => id.trim())
   : [];
 
-import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel,PermissionsBitField } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, GuildScheduledEventEntityType, GuildScheduledEventPrivacyLevel,PermissionsBitField,ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
 import { setupBumpNoticeHandler, handleNextBumpCommand, setupNextBumpOnStartup } from './BumpNotice.js';
@@ -33,7 +33,8 @@ const spoilerNoticeChannelId = process.env.SPOILER_NOTICE_CHANNEL_ID
 const mysekai_guildId = process.env.MYSEKAI_GUILD_ID
 const mysekai_titleChannelId = process.env.MYSEKAI_TITLE_CHANNEL
 // OCR APIエンドポイント
-const OCR_API_URL = 'http://python-result-calc:53744/ocr';
+// const OCR_API_URL = 'http://python-result-calc:53744/ocr';
+const OCR_API_URL = 'https://nenelobo-calc.wamom.f5.si/ocr';
 
 const mentionDeveloper = process.env.MENTION_USER_USUALLY_YOU
 
@@ -65,7 +66,22 @@ const commands = [
         )
         .setRequired(true)
     ),
-    new SlashCommandBuilder()
+  new SlashCommandBuilder()
+    .setName('resultsetting')
+    .setDescription('リザルト計算の設定をします。')
+    .addStringOption(option =>
+      option.setName('setting')
+        .setDescription('設定名')
+        .addChoices(
+          { name: 'リザルトからスコアを計算', value: 'calculate' },
+          { name: 'スコアデータとユーザーIDを紐付けて保存', value: 'save' }
+        )
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('resultdatadelete')
+    .setDescription('保存しているリザルトデータを削除します。'),
+  new SlashCommandBuilder()
     .setName('eventset')
     .setDescription('イベント用のネタバレロールをセットします')
     .addStringOption(option =>
@@ -73,7 +89,7 @@ const commands = [
         .setDescription('イベント名')
         .setRequired(true)
     ),
-    new SlashCommandBuilder()
+  new SlashCommandBuilder()
     .setName('mysekai-eventset')
     .setDescription('マイセカイコンテスト用のチャンネルをセットします')
     .addStringOption(option =>
@@ -319,7 +335,94 @@ client.on('interactionCreate', async interaction => {
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
-  } else if (interaction.commandName === 'gacha') {
+  } else if (interaction.commandName === 'resultsetting') {
+    const setting = interaction.options.getString('resultsetting');
+    switch (setting) {
+      case 'calculate':
+        await toggleCalculate(interaction);
+        break;
+      case 'save':
+        await toggleSave(interaction);
+        break;
+      default:
+        await interaction.reply({
+          content: '無効な setting 値です。',
+          ephemeral: true,
+        });
+    }
+  } else if (interaction.commandName === 'resultdatadelete') {
+    const setting = interaction.options.getString('setting');
+    
+    console.log('Setting received:', setting);
+    
+    // 設定が無効な場合は終了
+    if (setting !== 'delete-data') {
+        console.log('Invalid setting, exiting.');
+        return;
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('confirm_delete')
+            .setLabel('はい、削除してください')
+            .setStyle(ButtonStyle.Danger)
+    );
+
+    // 確認メッセージ
+    const message = await interaction.reply({
+        content: '本当に全データを削除しますか？\n10 秒以内に確認ボタンを押してください。',
+        components: [row],
+        ephemeral: true
+    });
+    
+    // ボタンの押下待ち
+    try {
+        const buttonInteraction = await message.awaitMessageComponent({
+            filter: (i) => i.customId === 'confirm_delete' && i.user.id === interaction.user.id,
+            time: 10_000 // 10秒のタイムアウト
+        });
+
+        console.log('Button pressed:', buttonInteraction.user.id);
+
+        // ボタンが押されたら削除開始メッセージ
+        await buttonInteraction.update({
+            content: '削除を開始します。',
+            components: []
+        });
+
+        // ---------------------
+        // ここで削除処理を行う
+        // ---------------------
+        try {
+            // 例: データベースからの削除処理
+            // db.prepare(`DELETE FROM scores WHERE user_id = ?`).run(interaction.user.id);
+            // db.prepare(`UPDATE users SET calculate = 0, save = 0 WHERE user_id = ?`).run(interaction.user.id);
+
+            console.log('Data deletion successful for user:', interaction.user.id);
+            await interaction.followUp({ content: '削除が完了しました。', ephemeral: true });
+        } catch (deleteError) {
+            console.error('Error during data deletion:', deleteError);
+            await buttonInteraction.followUp({ content: 'データ削除中にエラーが発生しました。', ephemeral: true });
+        }
+
+    } catch (err) {
+        // タイムアウト時（10 秒以内に押されなかった）
+        if (err.code === 'InteractionCollectorError') {
+            console.error('Timeout: User did not respond in time.');
+            await interaction.editReply({
+                content: '削除の同意が取れなかったため、削除アクションをキャンセルしました。',
+                components: []
+            });
+        } else {
+            console.error('Timeout or other error:', err);
+            
+            await interaction.editReply({
+                content: '削除アクション中にエラーが発生しました。',
+                components: []
+            });
+        }
+    }
+} else if (interaction.commandName === 'gacha') {
       const pulls = interaction.options.getInteger('pulls');
 
       if (pulls === 100) {
@@ -426,7 +529,7 @@ client.on('interactionCreate', async interaction => {
           await interaction.followUp(summary.join('\n'));
         }
       } 
-  } else if (interaction.commandName === 'eventset') {
+    } else if (interaction.commandName === 'eventset') {
     // 管理者権限チェック
     if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       await interaction.reply({ content: 'このコマンドは管理者のみが実行できます。', ephemeral: true });
@@ -594,6 +697,7 @@ client.on('messageCreate', async (message) => {
                 } else {
                   return [
                     `### Player_${player.player} 認識結果`,
+                    `-# 「 ${player.song_title} 」  ${player.song_difficulty}  `,
                     '```',
                     `PERFECT(3)  : ${player.perfect}`,
                     `GREAT(2)    : ${player.great}`,
@@ -609,7 +713,7 @@ client.on('messageCreate', async (message) => {
               await message.reply(reply);
             }
           } else {
-            await message.react('<:ocr_error_api:1389800393332101311>');
+            await message.react(process.env[`OCR_ERROR_API`]);
             await message.channel.send(`<@${mentionDeveloper}>`);
             console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
           }
@@ -742,28 +846,28 @@ client.on('messageCreate', async (message) => {
           if (result && result.results && result.results.length > 0) {
             if (result.results.length >= 2) {
               // 2人以上ならメンションしてもう一度送るようにリアクション
-              await message.react('<:ocr_error_2player:1389581609883406336>');
+              await message.react(process.env[`OCR_ERROR_2PLAYER`]);
               await new Promise(res => setTimeout(res, 500));
-              await message.react('<:ocr_error_info_mention:1389581588995768472>');
+              await message.react(process.env[`OCR_ERROR_INFO_MENTION`]);
             } else {
               // 1人だけならスコアを桁ごとに分解してカスタム絵文字でリアクション（0埋めせず実際の桁数のみ）
               const player = result.results[0];
               if (player.error) {
                 if (player.error.startsWith('数値変換に失敗')) {
-                  await message.react('<:ocr_error_convert:1389568868493561967>');
+                  await message.react(process.env[`OCR_ERROR_CONVERT`]);
                   await message.channel.send('${mentionDeveloper} ');
                 } else if (player.error === 'スコア認識に失敗') {
-                  await message.react('<:ocr_error_score:1389573918825775145>');
+                  await message.react(process.env[`OCR_ERROR_SCORE`]);
                   await message.channel.send('${mentionDeveloper} ');
                 } else {
                   // その他のエラー
-                  await message.react('<:ocr_error:1389568660401684500>');
+                  await message.react(process.env[`OCR_ERROR`]);
                   await message.channel.send('${mentionDeveloper} ');
                 }
               } else {
                 // スコアを左から右へ桁ごとに分解し、各桁・数字に対応するカスタム絵文字IDでリアクション
                 const scoreStr = String(player.score);
-                  await message.react('<:ocr_score:1389569033874968576>');
+                  await message.react(process.env[`EMOJI_SCORE`]);
                   await new Promise(res => setTimeout(res, 500));
                 for (let i = 0; i < scoreStr.length; i++) {
                   const digit = scoreStr[i];
