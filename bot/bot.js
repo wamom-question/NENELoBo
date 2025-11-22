@@ -1008,15 +1008,43 @@ client.on('messageCreate', async (message) => {
                 await interaction.reply('カウント値またはスコアが不正です。');
                 return;
               }
+              // 既存スコアを取得して比較
+              const getBestScore = db.prepare(`
+                SELECT perfect, great, good, bad, miss, score, created_at
+                FROM scores
+                WHERE user_id = ?
+                  AND song_id = ?
+                  AND difficulty = ?
+                  AND is_deleted = 0
+                ORDER BY score DESC
+                LIMIT 1
+              `);
+              const best = getBestScore.get(userId, songId, difficulty);
+
+                if (best) {
+                  // 2. 新しいスコアと比較
+                  if (newScore.score > best.score) {
+                    // 3. 自己ベスト更新メッセージ作成
+                    const message = [
+                    `自己ベスト更新！`
+                    `-# ${best.created_at} : ${best.perfect} - ${best.great} - ${best.good} - ${best.bad} - ${best.miss} (${best.score})`
+                    `→ ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`];
+
+                    console.log(message);
+                  }
+                } else {
+                  // 初回登録の場合
+                  console.log(`初めてのスコア登録です: ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`);
+                }
 
               // 4. scores へ書き込み
               const insertScore = db.prepare(`
                 INSERT INTO scores (
                   user_id, song_id, difficulty,
                   perfect, great, good, bad, miss,
-                  score, created_at
+                  score, created_at ,is_deleted
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
               `);
 
               insertScore.run(
@@ -1024,7 +1052,7 @@ client.on('messageCreate', async (message) => {
                 song_id,
                 song_difficulty,
                 perfect, great, good, bad, miss,
-                score
+                score ,0
               );
 
               await interaction.reply('スコアを保存しました。');
