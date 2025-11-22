@@ -33,8 +33,7 @@ const spoilerNoticeChannelId = process.env.SPOILER_NOTICE_CHANNEL_ID
 const mysekai_guildId = process.env.MYSEKAI_GUILD_ID
 const mysekai_titleChannelId = process.env.MYSEKAI_TITLE_CHANNEL
 // OCR APIエンドポイント
-// const OCR_API_URL = 'http://python-result-calc:53744/ocr';
-const OCR_API_URL = 'https://nenelobo-calc.wamom.f5.si/ocr';
+const OCR_API_URL = 'http://python-result-calc:53744/ocr';
 
 const mentionDeveloper = process.env.MENTION_USER_USUALLY_YOU
 
