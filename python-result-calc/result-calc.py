@@ -679,24 +679,26 @@ def ocr_endpoint():
             other_texts.sort(key=lambda x: abs(x[1] - diff_y), reverse=True)
             target = other_texts[0][0]
 
-        titles = []
-        json_file_path = '/app/assets/musics.json'
+        musics_path = '/app/assets/musics.json'
 
-        # JSONファイルを読み込む
-        with open(json_file_path, encoding='utf-8') as f:
-            data = json.load(f)
-            titles = [song["title"] for song in data] 
-        
-        best_title = None
+        # JSONファイル読み込み
+        with open(musics_path, encoding='utf-8') as f:
+            songs = json.load(f)
+
+        best_song = None
         best_distance = float("inf")
 
-        for title in titles:
-            dist = Levenshtein.distance(target, title)  # 通常のレーベンシュタイン距離
+        for song in songs:
+            title = song["title"]
+            dist = Levenshtein.distance(target, title)
             if dist < best_distance:
                 best_distance = dist
-                best_title = title
-        song_title = best_title
-        logging.info("曲名: {} (精度: {})".format(song_title, best_distance))
+                best_song = song
+
+        song_title = best_song["title"]
+        song_id = best_song["id"]
+
+        logging.info("曲名: {} / ID: {} (精度: {})".format(song_title, song_id, best_distance))
              
     else:
         label, x_local, x_global = None, None, None
@@ -850,6 +852,7 @@ def ocr_endpoint():
                     all_player_scores.append({
                         'song_difficulty': song_difficulty,
                         'song_title': song_title,
+                        'song_id': song_id,
                         'player': player_number,
                         'perfect': perfect_val,
                         'great': great_val,
