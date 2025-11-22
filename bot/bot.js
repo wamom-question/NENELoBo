@@ -11,6 +11,7 @@ import { promises as fs } from 'fs';
 import { setupBumpNoticeHandler, handleNextBumpCommand, setupNextBumpOnStartup } from './BumpNotice.js';
 import { performSimpleGachaDraw, performGacha100, performGacha10, calculateCombinationProbability } from './gacha.js';
 import FormData from 'form-data';
+import Database from 'better-sqlite3';
 
 // 環境変数から設定を読み込む
 const token = process.env.DISCORD_TOKEN;
@@ -36,6 +37,32 @@ const mysekai_titleChannelId = process.env.MYSEKAI_TITLE_CHANNEL
 const OCR_API_URL = 'http://python-result-calc:53744/ocr';
 
 const mentionDeveloper = process.env.MENTION_USER_USUALLY_YOU
+
+const db = new Database('/app/data/scoredata.sqlite');
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY,
+    save_enabled INTEGER NOT NULL CHECK (save_enabled IN (0, 1)),
+    is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+    registered_at DATETIME NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS scores (
+    result_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    song_id TEXT NOT NULL,
+    difficulty INTEGER NOT NULL,
+    perfect INTEGER NOT NULL,
+    great INTEGER NOT NULL,
+    good INTEGER NOT NULL,
+    bad INTEGER NOT NULL,
+    miss INTEGER NOT NULL,
+    score INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+    FOREIGN KEY(user_id) REFERENCES users(user_id)
+  );
+`);
 
 // クライアントの作成
 const client = new Client({
@@ -66,14 +93,14 @@ const commands = [
         .setRequired(true)
     ),
   new SlashCommandBuilder()
-    .setName('resultsetting')
-    .setDescription('リザルト計算の設定をします。')
-    .addStringOption(option =>
-      option.setName('setting')
-        .setDescription('設定名')
+    .setName('resultsave')
+    .setDescription('リザルトを保存するか設定をします。') 
+    .addIntegerOption(option =>
+      option.setName('value')
+        .setDescription('設定値')
         .addChoices(
-          { name: 'リザルトからスコアを計算', value: 'calculate' },
-          { name: 'スコアデータとユーザーIDを紐付けて保存', value: 'save' }
+          { name: '保存する', value: 1 },
+          { name: '保存しない', value: 0 },
         )
         .setRequired(true)
     ),
@@ -306,6 +333,23 @@ async function handleAnnouncementText(text) {
   }
 }
 
+// scores の INSERT 文を事前に準備しておく（高負荷時のロックを避けるため）
+// アプリ起動後一度だけ prepare するのが正しい使い方。
+const insertScore = db.prepare(`
+  INSERT INTO scores (
+    user_id, song_id, difficulty,
+    perfect, great, good, bad, miss,
+    score, created_at ,is_deleted
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+  )
+`);
+
+// ユーザ設定チェック用
+const selectUserSetting = db.prepare(`
+  SELECT save_enabled FROM users WHERE user_id = ?
+`);
+
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
   console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
@@ -334,32 +378,45 @@ client.on('interactionCreate', async interaction => {
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
-  } else if (interaction.commandName === 'resultsetting') {
-    const setting = interaction.options.getString('resultsetting');
-    switch (setting) {
-      case 'calculate':
-        await toggleCalculate(interaction);
-        break;
-      case 'save':
-        await toggleSave(interaction);
-        break;
-      default:
-        await interaction.reply({
-          content: '無効な setting 値です。',
-          ephemeral: true,
-        });
-    }
-  } else if (interaction.commandName === 'resultdatadelete') {
-    const setting = interaction.options.getString('setting');
-    
-    console.log('Setting received:', setting);
-    
-    // 設定が無効な場合は終了
-    if (setting !== 'delete-data') {
-        console.log('Invalid setting, exiting.');
-        return;
-    }
+  } else if (interaction.commandName === 'resultsave') {
+      const userId = interaction.user.id;
+        const value = interaction.options.getInteger('value'); // 0 or 1
 
+        // 1. 対象ユーザーが存在するか確認
+        const selectUser = db.prepare(`
+          SELECT save_enabled FROM users WHERE user_id = ?
+        `);
+        const user = selectUser.get(userId);
+
+        // 2. ユーザー未登録 → 挿入
+        if (!user) {
+          const insertUser = db.prepare(`
+            INSERT INTO users (user_id, save_enabled, registered_at)
+            VALUES (?, ?, datetime('now'))
+          `);
+          insertUser.run(userId, value);
+
+          // 応答
+          if (value === 1) {
+            await interaction.reply('保存を有効にしました。');
+          } else {
+            await interaction.reply('保存を無効にしました。');
+          }
+          return;
+        }
+
+        // 3. 既存ユーザー → 値を更新
+        const updateUser = db.prepare(`
+          UPDATE users SET save_enabled = ? WHERE user_id = ?
+        `);
+        updateUser.run(value, userId);
+
+        if (value === 1) {
+          await interaction.reply('保存を有効にしました。');
+        } else {
+          await interaction.reply('保存を無効にしました。');
+        }
+  } else if (interaction.commandName === 'resultdatadelete') {
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('confirm_delete')
@@ -388,21 +445,42 @@ client.on('interactionCreate', async interaction => {
             content: '削除を開始します。',
             components: []
         });
-
-        // ---------------------
-        // ここで削除処理を行う
-        // ---------------------
         try {
-            // 例: データベースからの削除処理
-            // db.prepare(`DELETE FROM scores WHERE user_id = ?`).run(interaction.user.id);
-            // db.prepare(`UPDATE users SET calculate = 0, save = 0 WHERE user_id = ?`).run(interaction.user.id);
+          const userId = interaction.user.id;
 
-            console.log('Data deletion successful for user:', interaction.user.id);
-            await interaction.followUp({ content: '削除が完了しました。', ephemeral: true });
-        } catch (deleteError) {
-            console.error('Error during data deletion:', deleteError);
-            await buttonInteraction.followUp({ content: 'データ削除中にエラーが発生しました。', ephemeral: true });
-        }
+          const deleteUser = db.prepare(`
+              UPDATE users
+              SET save_enabled = 0,
+                  is_deleted = 1
+              WHERE user_id = ?
+          `);
+
+          const deleteScores = db.prepare(`
+              UPDATE scores
+              SET is_deleted = 1
+              WHERE user_id = ?
+          `);
+
+          const transaction = db.transaction((uid) => {
+              deleteUser.run(uid);
+              deleteScores.run(uid);
+          });
+
+          transaction(userId);
+
+          console.log('Data deletion successful for user:', userId);
+          await buttonInteraction.followUp({
+              content: '削除が完了しました。',
+              ephemeral: true
+          });
+
+      } catch (deleteError) {
+          console.error('Error during data deletion:', deleteError);
+          await buttonInteraction.followUp({
+              content: 'データ削除中にエラーが発生しました。',
+              ephemeral: true
+          });
+      }
 
     } catch (err) {
         // タイムアウト時（10 秒以内に押されなかった）
@@ -885,6 +963,71 @@ client.on('messageCreate', async (message) => {
                 `-# 「 ${player.song_title} 」  ${player.song_difficulty}  `,
               ].join('\n');
               await message.reply(reply);
+
+              const userId = interaction.user.id;
+
+              // 1. 保存設定を確認
+              const getUser = db.prepare(`
+                SELECT save_enabled FROM users WHERE user_id = ?
+              `);
+              const user = getUser.get(userId);
+
+              // 1-1. ユーザー自体がいない → 保存しない扱い
+              if (!user || user.save_enabled === 0) {
+                await interaction.reply('保存設定が無効のため、結果は保存しません。');
+                return;
+              }
+              // 3. 必須フィールドの検証
+              const {
+                song_id,
+                song_difficulty,
+                perfect,
+                great,
+                good,
+                bad,
+                miss,
+                score
+              } = player;
+
+              if (!song_id || typeof song_id !== 'string') {
+                await interaction.reply('曲IDが不正なため保存できません。');
+                return;
+              }
+
+              if (
+                typeof song_difficulty !== 'number' ||
+                song_difficulty < 0 ||
+                song_difficulty > 5
+              ) {
+                await interaction.reply('難易度データが不正なため保存できません。');
+                return;
+              }
+
+              const ints = [perfect, great, good, bad, miss, score];
+              if (ints.some(v => typeof v !== 'number' || !Number.isInteger(v))) {
+                await interaction.reply('カウント値またはスコアが不正です。');
+                return;
+              }
+
+              // 4. scores へ書き込み
+              const insertScore = db.prepare(`
+                INSERT INTO scores (
+                  user_id, song_id, difficulty,
+                  perfect, great, good, bad, miss,
+                  score, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+              `);
+
+              insertScore.run(
+                userId,
+                song_id,
+                song_difficulty,
+                perfect, great, good, bad, miss,
+                score
+              );
+
+              await interaction.reply('スコアを保存しました。');
             }
           } else {
             await message.react('<:ocr_error_api:1389800393332101311>');
