@@ -34,11 +34,11 @@ const spoilerNoticeChannelId = process.env.SPOILER_NOTICE_CHANNEL_ID
 const mysekai_guildId = process.env.MYSEKAI_GUILD_ID
 const mysekai_titleChannelId = process.env.MYSEKAI_TITLE_CHANNEL
 // OCR APIエンドポイント
-const OCR_API_URL = 'http://python-result-calc:53744/ocr';
+const OCR_API_URL = 'http://nenelobo-calc.wamom.f5.si:53744/ocr';
 
 const mentionDeveloper = process.env.MENTION_USER_USUALLY_YOU
 
-const db = new Database('/app/data/scoredata.sqlite');
+const db = new Database('/app/data/score-data.sqlite');
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
@@ -341,7 +341,7 @@ const insertScore = db.prepare(`
     perfect, great, good, bad, miss,
     score, created_at ,is_deleted
   ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?
   )
 `);
 
@@ -685,6 +685,7 @@ async function setMysekaiChannel(eventName) {
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+  const userId = message.author.id;
   if (message.mentions.has(client.user, { ignoreEveryone: true }) && message.attachments.size > 0) {
     const isDebug = message.content.toLowerCase().includes('debug');
     for (const attachment of message.attachments.values()) {
@@ -768,26 +769,124 @@ client.on('messageCreate', async (message) => {
               await message.reply(reply);
             } else {
               // 1人だけなら従来通り
-              let reply = result.results.map(player => {
-                if (player.error) {
-                    return `Player_${player.player}: 認識失敗 (${player.error})`;
-                } else {
-                  return [
-                    `### Player_${player.player} 認識結果`,
-                    `-# 「 ${player.song_title} 」  ${player.song_difficulty}  `,
-                    '```',
-                    `PERFECT(3)  : ${player.perfect}`,
-                    `GREAT(2)    : ${player.great}`,
-                    `GOOD(1)     : ${player.good}`,
-                    `BAD(0)      : ${player.bad}`,
-                    `MISS(0)     : ${player.miss}`,
-                    '```',
-                    '',
-                    `## ランクマスコア  ${player.score}`
-                  ].join('\n');
-                }
-              }).join('\n\n');
+              const player = result.results[0];
+
+              if (player.error) {
+                await message.reply(`Player_${player.player}: 認識失敗 (${player.error})`);
+                return;
+              }
+
+              const reply = [
+                `### Player_${player.player} 認識結果`,
+                `-# 「 ${player.song_title} 」  ${player.song_difficulty}  `,
+                '```',
+                `PERFECT(3)  : ${player.perfect}`,
+                `GREAT(2)    : ${player.great}`,
+                `GOOD(1)     : ${player.good}`,
+                `BAD(0)      : ${player.bad}`,
+                `MISS(0)     : ${player.miss}`,
+                '```',
+                '',
+                `## ランクマスコア  ${player.score}`
+              ].join('\n');
+
               await message.reply(reply);
+
+              // 1. 保存設定を確認
+              const getUser = db.prepare(`
+                SELECT save_enabled FROM users WHERE user_id = ?
+              `);
+              const user = getUser.get(userId);
+
+              // 1-1. ユーザー自体がいない → 保存しない扱い
+              if (!user || user.save_enabled === 0) {
+                await message.reply('保存設定が無効のため、結果は保存しません。');
+                return;
+              }
+
+              // 3. 必須フィールドの検証
+              const {
+                song_id,
+                song_difficulty,
+                perfect,
+                great,
+                good,
+                bad,
+                miss,
+                score
+              } = player;
+
+              if (!song_id || typeof song_id !== 'string') {
+                await message.reply('曲IDが不正なため保存できません。');
+                return;
+              }
+
+              if (
+                typeof song_difficulty !== 'number' ||
+                song_difficulty < 0 ||
+                song_difficulty > 5
+              ) {
+                await message.reply('難易度データが不正なため保存できません。');
+                return;
+              }
+
+              const ints = [perfect, great, good, bad, miss, score];
+              if (ints.some(v => typeof v !== 'number' || !Number.isInteger(v))) {
+                await message.reply('カウント値またはスコアが不正です。');
+                return;
+              }
+
+              // 既存スコアを取得して比較
+              const getBestScore = db.prepare(`
+                SELECT perfect, great, good, bad, miss, score, created_at
+                FROM scores
+                WHERE user_id = ?
+                  AND song_id = ?
+                  AND difficulty = ?
+                  AND is_deleted = 0
+                ORDER BY score DESC
+                LIMIT 1
+              `);
+              const best = getBestScore.get(userId, song_id, song_difficulty);
+
+              const newScore = { perfect, great, good, bad, miss, score };
+
+              if (best) {
+                // 2. 新しいスコアと比較
+                if (newScore.score > best.score) {
+                  // 3. 自己ベスト更新メッセージ作成
+                  const messageLines = [
+                    '自己ベスト更新！',
+                    `-# ${best.created_at} : ${best.perfect} - ${best.great} - ${best.good} - ${best.bad} - ${best.miss} (${best.score})`,
+                    `→ ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`
+                  ];
+
+                  console.log(messageLines.join('\n'));
+                }
+              } else {
+                // 初回登録の場合
+                console.log(`初めてのスコア登録です: ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`);
+              }
+
+              // 4. scores へ書き込み
+              const insertScore = db.prepare(`
+                INSERT INTO scores (
+                  user_id, song_id, difficulty,
+                  perfect, great, good, bad, miss,
+                  score, created_at, is_deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+              `);
+
+              insertScore.run(
+                userId,
+                song_id,
+                song_difficulty,
+                perfect, great, good, bad, miss,
+                score, 0
+              );
+
+              await message.reply('スコアを保存しました。');
             }
           } else {
             await message.react(process.env[`OCR_ERROR_API`]);
@@ -838,6 +937,7 @@ client.on('messageCreate', async (message) => {
 // ocrAlwaysChannelId で画像付きメッセージが送信された場合にOCR APIへ送信
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+  const userId = message.author.id;
   if (ocrAlwaysChannelIds.includes(message.channel.id) && message.attachments.size > 0) {
     const imageAttachments = [...message.attachments.values()].filter(att => att.contentType && att.contentType.startsWith('image'));
     const isMultipleImages = imageAttachments.length >= 2;
@@ -964,8 +1064,6 @@ client.on('messageCreate', async (message) => {
               ].join('\n');
               await message.reply(reply);
 
-              const userId = interaction.user.id;
-
               // 1. 保存設定を確認
               const getUser = db.prepare(`
                 SELECT save_enabled FROM users WHERE user_id = ?
@@ -974,7 +1072,7 @@ client.on('messageCreate', async (message) => {
 
               // 1-1. ユーザー自体がいない → 保存しない扱い
               if (!user || user.save_enabled === 0) {
-                await interaction.reply('保存設定が無効のため、結果は保存しません。');
+                await message.reply('保存設定が無効のため、結果は保存しません。');
                 return;
               }
               // 3. 必須フィールドの検証
@@ -1019,32 +1117,35 @@ client.on('messageCreate', async (message) => {
                 ORDER BY score DESC
                 LIMIT 1
               `);
-              const best = getBestScore.get(userId, songId, difficulty);
+              const best = getBestScore.get(userId, song_id, song_difficulty);
 
-                if (best) {
-                  // 2. 新しいスコアと比較
-                  if (newScore.score > best.score) {
-                    // 3. 自己ベスト更新メッセージ作成
-                    const message = [
-                    `自己ベスト更新！`
-                    `-# ${best.created_at} : ${best.perfect} - ${best.great} - ${best.good} - ${best.bad} - ${best.miss} (${best.score})`
-                    `→ ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`];
+              const newScore = { perfect, great, good, bad, miss, score };
 
-                    console.log(message);
-                  }
-                } else {
-                  // 初回登録の場合
-                  console.log(`初めてのスコア登録です: ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`);
+              if (best) {
+                // 2. 新しいスコアと比較
+                if (newScore.score > best.score) {
+                  // 3. 自己ベスト更新メッセージ作成
+                  const messageLines = [
+                    '自己ベスト更新！',
+                    `-# ${best.created_at} : ${best.perfect} - ${best.great} - ${best.good} - ${best.bad} - ${best.miss} (${best.score})`,
+                    `→ ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`
+                  ];
+
+                  console.log(messageLines.join('\n'));
                 }
+              } else {
+                // 初回登録の場合
+                console.log(`初めてのスコア登録です: ${newScore.perfect} - ${newScore.great} - ${newScore.good} - ${newScore.bad} - ${newScore.miss} (${newScore.score})`);
+              }
 
               // 4. scores へ書き込み
               const insertScore = db.prepare(`
                 INSERT INTO scores (
                   user_id, song_id, difficulty,
                   perfect, great, good, bad, miss,
-                  score, created_at ,is_deleted
+                  score, created_at, is_deleted
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
               `);
 
               insertScore.run(
@@ -1052,10 +1153,10 @@ client.on('messageCreate', async (message) => {
                 song_id,
                 song_difficulty,
                 perfect, great, good, bad, miss,
-                score ,0
+                score, 0
               );
 
-              await interaction.reply('スコアを保存しました。');
+              await message.reply('スコアを保存しました。');
             }
           } else {
             await message.react('<:ocr_error_api:1389800393332101311>');
