@@ -5,6 +5,7 @@ import fs from 'fs';
 import fetch from 'node-fetch';
 import { EmbedBuilder, Events } from 'discord.js';
 import { calculateCombinationProbability } from './gacha.js';
+import { channel } from 'diagnostics_channel';
 
 const jstNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
 const currentYear = jstNow.getFullYear();
@@ -362,6 +363,13 @@ export function setupBumpNoticeHandler(client) {
         const bumpTime = new Date(Date.now() + 2 * 60 * 60 * 1000);
         const guildId = message.guildId;
 
+          try {
+            await channel.setName(`🕹｜command`);
+            console.log(`チャンネル名が「🕹｜command}」に変更されました！`);
+          } catch (error) {
+            console.error('名前を「🕹｜command}」に変更中にエラーが発生しました:', error);
+          }
+
         await handleBumpSuccess(message, bumpFromMain, bumpTime, guildId);
 
         return;
@@ -408,7 +416,7 @@ export function setupBumpNoticeHandler(client) {
   console.log('🟢 BumpNotice handler が有効になりました (messageCreate を監視中)');
 
   // Function to handle the reminder notification based on nextBumpTime
-  async function sendNextBumpNotification(client, bumpTime, guildId) {
+  async function sendNextBumpNotification(client, bumpTime, channel) {
     const jstDate = new Date(bumpTime.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
     const bumpHour = jstDate.getHours();
     const bumpDay = jstDate.getDay();
@@ -430,11 +438,18 @@ export function setupBumpNoticeHandler(client) {
     } catch (err) {
       console.error('❗ Bumpリマインダー送信失敗（スレッド送信時）:', err);
     }
+
+    try {
+    await channel.setName(`🕹｜「/bump」をお願いします！`);
+    console.log(`チャンネル名が「🕹｜「/bump」をお願いします！」に変更されました`);
+    } catch (error) {
+        console.error('名前を「🕹｜「/bump」をお願いします！」に変更中にエラーが発生しました:', error);
+    }
   }
 
   const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
   if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) <= new Date()) {
-    sendNextBumpNotification(client, new Date(nextBumpData.nextBumpTime), process.env.BUMP_SURVEIL_GUILD);
+    sendNextBumpNotification(client, new Date(nextBumpData.nextBumpTime), process.env.MAIN_BUMP_CHANNEL_ID);
   } else if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) > new Date()) {
     const { nextBumpTime, guildId } = nextBumpData;
     const start = Date.now();
@@ -537,7 +552,7 @@ async function updateCountdown(countdownMessage, bumpFromMain, bumpTime, guildId
       // 通知処理
       const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
       if (!nextBumpData.notified) {
-        await sendNextBumpNotification(client, bumpTime, guildId);
+        await sendNextBumpNotification(client, bumpTime, channel);
       }
       try {
         if (countdownMessage && typeof countdownMessage.delete === 'function') {
@@ -645,7 +660,7 @@ export async function handleNextBumpCommand(interaction, client) {
 }
 
 // Function to handle the reminder notification based on nextBumpTime
-export async function sendNextBumpNotification(client, bumpTime, guildId) {
+export async function sendNextBumpNotification(client, bumpTime, channel) {
   const jstDate = new Date(bumpTime.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
   const bumpHour = jstDate.getHours();
   const bumpDay = jstDate.getDay();
