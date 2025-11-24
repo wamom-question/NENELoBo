@@ -5,7 +5,6 @@ import fs from 'fs';
 import fetch from 'node-fetch';
 import { EmbedBuilder, Events } from 'discord.js';
 import { calculateCombinationProbability } from './gacha.js';
-import { channel } from 'diagnostics_channel';
 
 const jstNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
 const currentYear = jstNow.getFullYear();
@@ -79,6 +78,31 @@ function writeJsonFile(filePath, data) {
     console.log(`✅ JSONファイルに書き込み成功: ${filePath}`);
   } catch (error) {
     console.error(`❌ JSONファイルの書き込みに失敗しました: ${filePath}`, error);
+  }
+}
+
+// 安全にチャンネル名を変更するヘルパー
+async function safeSetChannelName(channelOrId, client, newName) {
+  try {
+    let ch = channelOrId;
+    if (typeof channelOrId === 'string') {
+      ch = await client.channels.fetch(channelOrId).catch(() => null);
+    }
+    if (!ch) {
+      throw new Error('チャンネルが見つかりません');
+    }
+
+    if (typeof ch.setName === 'function') {
+      await ch.setName(newName);
+    } else if (typeof ch.edit === 'function') {
+      await ch.edit({ name: newName });
+    } else {
+      console.warn('⛔ チャンネルは名前変更APIをサポートしていません');
+      return;
+    }
+    console.log(`チャンネル名が「${newName}」に変更されました`);
+  } catch (err) {
+    console.error(`名前を「${newName}」に変更中にエラーが発生しました:`, err);
   }
 }
 
@@ -364,10 +388,10 @@ export function setupBumpNoticeHandler(client) {
         const guildId = message.guildId;
 
           try {
-            await channel.setName(`🕹｜command`);
-            console.log(`チャンネル名が「🕹｜command}」に変更されました！`);
+            await safeSetChannelName(message.channel, message.client, '🕹｜command');
+            console.log('チャンネル名が「🕹｜command」に変更されました！');
           } catch (error) {
-            console.error('名前を「🕹｜command}」に変更中にエラーが発生しました:', error);
+            console.error('名前を「🕹｜command」に変更中にエラーが発生しました:', error);
           }
 
         await handleBumpSuccess(message, bumpFromMain, bumpTime, guildId);
@@ -415,37 +439,7 @@ export function setupBumpNoticeHandler(client) {
   });
   console.log('🟢 BumpNotice handler が有効になりました (messageCreate を監視中)');
 
-  // Function to handle the reminder notification based on nextBumpTime
-  async function sendNextBumpNotification(client, bumpTime, channel) {
-    const jstDate = new Date(bumpTime.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-    const bumpHour = jstDate.getHours();
-    const bumpDay = jstDate.getDay();
-    const isHolidayMode = bumpDay === 0 || bumpDay === 6 || await isHoliday(jstDate);
-    const timeKey = getTimeSlotKey(bumpHour);
-    const targetId = (isHolidayMode ? THREAD_MAP.holiday : THREAD_MAP.weekday)[timeKey];
-
-    try {
-      const targetChannel = await client.channels.fetch(targetId);
-      await targetChannel.send({
-        content: '@here',
-        embeds: [createEmbed('Bumpできます！', '`/bump` でサーバーの掲載順を上にできます。')]
-      });
-
-      // 通知済みフラグを更新
-      const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
-      nextBumpData.notified = true;
-      writeJsonFile(NEXT_BUMP_FILE, nextBumpData);
-    } catch (err) {
-      console.error('❗ Bumpリマインダー送信失敗（スレッド送信時）:', err);
-    }
-
-    try {
-    await channel.setName(`🕹｜「/bump」をお願いします！`);
-    console.log(`チャンネル名が「🕹｜「/bump」をお願いします！」に変更されました`);
-    } catch (error) {
-        console.error('名前を「🕹｜「/bump」をお願いします！」に変更中にエラーが発生しました:', error);
-    }
-  }
+  // 内部の sendNextBumpNotification は削除しました。エクスポート済みの関数を使用します。
 
   const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
   if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) <= new Date()) {
@@ -552,7 +546,7 @@ async function updateCountdown(countdownMessage, bumpFromMain, bumpTime, guildId
       // 通知処理
       const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
       if (!nextBumpData.notified) {
-        await sendNextBumpNotification(client, bumpTime, channel);
+          await sendNextBumpNotification(client, bumpTime, process.env.MAIN_BUMP_CHANNEL_ID);
       }
       try {
         if (countdownMessage && typeof countdownMessage.delete === 'function') {
@@ -681,5 +675,12 @@ export async function sendNextBumpNotification(client, bumpTime, channel) {
     writeJsonFile(NEXT_BUMP_FILE, nextBumpData);
   } catch (err) {
     console.error('❗ Bumpリマインダー送信失敗（スレッド送信時）:', err);
+  }
+
+  // メインチャンネル（または渡されたチャンネル）名を変更し案内を目立たせる
+  try {
+    await safeSetChannelName(channel, client, '🕹｜「/bump」をお願いします！');
+  } catch (err) {
+    console.error('名前変更処理でエラーが発生しました:', err);
   }
 }
