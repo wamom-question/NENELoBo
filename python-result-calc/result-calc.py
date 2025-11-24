@@ -742,6 +742,7 @@ def ocr_endpoint():
     img = cv2.resize(img, (1800, 1080), interpolation=cv2.INTER_AREA)
     processed_img = img.copy()
     all_perfect_positions, all_miss_positions = [], []
+    label_regions = []
     logging.info("perfect/miss 抽出処理開始")
     for _ in range(5):
         perfect_positions, miss_positions = extract_perfect_miss_positions(processed_img)
