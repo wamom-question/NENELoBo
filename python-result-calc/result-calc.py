@@ -591,16 +591,36 @@ def get_easyocr_reader():
 
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
-    label_regions = []
-    logging.info("ラベル領域初期化")
     if 'image' not in request.files:
+        logging.error("No image uploaded")
         return jsonify({'error': 'No image uploaded'}), 400
+
     file = request.files['image']
-    debug = request.form.get('debug', '0') == '1'
-    in_memory_file = BytesIO()
-    file.save(in_memory_file)
-    data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
-    img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    
+    # MIMEタイプチェック
+    if file.mimetype not in ['image/png', 'image/jpeg']:
+        logging.error("Invalid file type")
+        return jsonify({'error': 'Invalid file type. Only PNG and JPEG are allowed.'}), 400
+    
+    # 最大ファイルサイズのチェック
+    if file.content_length > 10 * 1024 * 1024:
+        logging.error("File too large")
+        return jsonify({'error': 'File too large. Maximum size is 10MB.'}), 400
+    
+    try:
+        in_memory_file = BytesIO()
+        file.save(in_memory_file)
+        data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            logging.error("Image could not be decoded")
+            return jsonify({'error': 'Could not decode the image.'}), 400
+        
+        logging.info(f"Image loaded successfully: img.shape={img.shape}")
+    except Exception as e:
+        logging.error(f"Error processing image: {str(e)}")
+        return jsonify({'error': 'An error occurred while processing the image.'}), 500
 
     logging.info(f"画像読み込み成功: img.shape={img.shape if img is not None else 'None'}")
     song_h, song_w = img.shape[:2]
