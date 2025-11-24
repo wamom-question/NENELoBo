@@ -623,6 +623,9 @@ def ocr_endpoint():
         return jsonify({'error': 'An error occurred while processing the image.'}), 500
 
     logging.info(f"画像読み込み成功: img.shape={img.shape if img is not None else 'None'}")
+    # debug フラグはクエリ引数またはフォームから受け取れる（例: ?debug=1）
+    debug_param = request.args.get('debug', request.form.get('debug', '0'))
+    debug = str(debug_param).lower() in ('1')
     song_h, song_w = img.shape[:2]
     song_1left = img[:, :song_w // 2]
     song_2h_left = song_1left.shape[0]
@@ -656,7 +659,7 @@ def ocr_endpoint():
         # x_local を基準に song_3top_block を右端まで切り抜く
         song_3top_block = song_3top_block[:, x_global:]
 
-            # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
+    # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
     reader_jp_en = easyocr.Reader(['ja', 'en'])
     results_full = reader_jp_en.readtext(song_3top_block)
 
@@ -813,6 +816,8 @@ def ocr_endpoint():
         ocr_success = False
         debug_crop_b64 = None
         debug_pre_b64 = None
+        # ループ外で ocr_text_list を初期化して未定義参照を防ぐ
+        ocr_text_list = []
 
         for attempt, chosen in enumerate(saved_params):
             threshold = to_int_safe(chosen['threshold'])
