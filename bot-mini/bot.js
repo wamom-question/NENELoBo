@@ -196,7 +196,7 @@ client.on('messageCreate', async (message) => {
                 if (player.error) {
                     return `Player_${player.player}: 認識失敗 (${player.error})  [エラー報告](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header)をお願いします。`;
                 } else {
-                  return [
+                    return [
                     `### Player_${player.player} 認識結果`,
                     '```',
                     `PERFECT(3)  : ${player.perfect}`,
@@ -206,7 +206,7 @@ client.on('messageCreate', async (message) => {
                     `MISS(0)     : ${player.miss}`,
                     '```',
                     '',
-                    `## ランクマスコア  ${player.score}`
+                    `## ランクマスコア  ${player.score}`,
                     `-# 「 ${player.song_title} 」  ${player.song_difficulty} `
                   ].join('\n');
                 }
