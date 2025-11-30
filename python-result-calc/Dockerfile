@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # --- EasyOCRモデルの事前ダウンロード ---
 # /root/.EasyOCR/model にモデルがキャッシュされる
 # このステップは requirements.txt が変更されない限り、キャッシュが効く
+RUN rm -rf /root/.EasyOCR/model
 RUN python -c "import easyocr; easyocr.Reader(['en', 'ja'], gpu=False)"
 
 # アプリケーションコードをコピー
