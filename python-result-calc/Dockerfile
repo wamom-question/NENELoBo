@@ -34,11 +34,6 @@ WORKDIR /usr/src/app
 # site-packages フォルダ全体をコピーします
 COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
 
-# 3. builderステージからEasyOCRモデルをコピー
-# モデルは /root/.EasyOCR/model にあるため、環境変数を考慮して/usr/src/app/.EasyOCR/model などにコピーするのが安全です。
-# ただし、ユーザーがrootである場合、/root/.EasyOCR/model のままコピーできます。
-COPY --from=builder /root/.EasyOCR/model /root/.EasyOCR/model
-
 # 4. アプリケーションコードをコピー
 COPY . .
 
