@@ -16,6 +16,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./assets:/app/assets
+      - ./model:/root/.EasyOCR/model
     ports:
       - "53744:53744"
     networks:
