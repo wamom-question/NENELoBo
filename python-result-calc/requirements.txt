@@ -5,3 +5,4 @@ easyocr
 pytesseract
 numpy<2
 rapidfuzz
+gunicorn

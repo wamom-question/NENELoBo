@@ -9,6 +9,8 @@ import { Routes, SlashCommandBuilder, EmbedBuilder, Client, GatewayIntentBits, C
 // 環境変数から設定を読み込む
 const token = process.env.MINI_DISCORD_TOKEN;
 const clientId = process.env.MINI_CLIENT_ID;
+const adminChannelId = process.env.MINI_ADMIN_CHANNEL_ID; // optional: channel to post admin notifications
+const adminUserId = process.env.MINI_ADMIN_USER_ID; // optional: user to DM for admin notifications
 
 const client = new Client({
   intents: [
@@ -19,7 +21,7 @@ const client = new Client({
 });
 
 // OCR APIエンドポイント
-const OCR_API_URL = 'https://nenelobo-calc.wamom.f5.si/ocr';
+const OCR_API_URL = process.env.OCR_API_URL || 'https://nenelobo-calc.wamom.f5.si/ocr';
 
 const rest = new REST({ version: '10' }).setToken(token);
 // スラッシュコマンドの定義
@@ -38,22 +40,73 @@ const commands = [
     .toJSON()
 ];
 
-  await rest.put(
-    Routes.applicationCommands(clientId),
-    { body: commands }
-  );
+// register global commands with error handling
+try {
+  if (!clientId) throw new Error('MINI_CLIENT_ID is not set');
+  await rest.put(Routes.applicationCommands(clientId), { body: commands });
   console.log('✅ グローバルコマンドを登録しました。');
+} catch (err) {
+  console.error('グローバルコマンド登録に失敗しました:', err);
+  // sendAdminNotification is declared later (function declaration hoisting ensures it's available)
+  try { sendAdminNotification && sendAdminNotification(`グローバルコマンド登録に失敗しました: ${err && err.message ? err.message : String(err)}`); } catch (e) { console.error('sendAdminNotification failed:', e); }
+}
 
 // Botが起動したらログ出力
-client.once('clientReady', async () => {
+// Notification queue: hold messages until the bot is ready
+const _adminNotificationQueue = [];
+
+/**
+ * Send admin notification to configured channel or user. Will queue if client isn't ready.
+ * Uses function declaration so it's hoisted and callable earlier.
+ */
+async function sendAdminNotification(content, options = {}) {
+  const payload = { content };
+  if (options.embed) payload.embeds = [options.embed];
+  try {
+    if (client && client.isReady && client.isReady()) {
+      if (adminChannelId) {
+        const ch = await client.channels.fetch(adminChannelId).catch(() => null);
+        if (ch && ch.send) return ch.send(payload).catch(err => console.error('admin channel send failed:', err));
+      }
+      if (adminUserId) {
+        const u = await client.users.fetch(adminUserId).catch(() => null);
+        if (u && u.send) return u.send(payload).catch(err => console.error('admin user send failed:', err));
+      }
+    }
+  } catch (err) {
+    console.error('sendAdminNotification immediate attempt failed:', err);
+  }
+  // fallback: queue for sending later
+  _adminNotificationQueue.push(payload);
+}
+
+client.once('ready', async () => {
   console.log('Bot is online!');
+  // Flush queued admin notifications
+  while (_adminNotificationQueue.length > 0) {
+    const p = _adminNotificationQueue.shift();
+    try {
+      if (adminChannelId) {
+        const ch = await client.channels.fetch(adminChannelId).catch(() => null);
+        if (ch && ch.send) await ch.send(p).catch(err => console.error('flushed send failed:', err));
+        continue;
+      }
+      if (adminUserId) {
+        const u = await client.users.fetch(adminUserId).catch(() => null);
+        if (u && u.send) await u.send(p).catch(err => console.error('flushed user send failed:', err));
+      }
+    } catch (err) {
+      console.error('Failed flushing admin notification:', err);
+    }
+  }
 });
 
 // コマンド実行時の処理
 client.on('interactionCreate', async interaction => {
-  console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
-  if (interaction.isChatInputCommand()) {
-  if (interaction.commandName === 'ping') {
+  try {
+    console.log('💬 interactionCreate イベントが発生:', interaction.commandName);
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === 'ping') {
     const ping = client.ws.ping;
 
     // 外部テキストファイルを読み込む
@@ -76,33 +129,15 @@ client.on('interactionCreate', async interaction => {
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
-  } else if (interaction.commandName === 'help') {
-    // 外部テキストファイルを読み込む
-    let rawText;
-    try {
-      rawText = await fs.readFile('/app/data/help_message.txt', 'utf-8');
-    } catch (err) {
-      console.error('help_message.txt の読み込みに失敗:', err);
+      } else if (interaction.commandName === 'help') {
+        // handled below in same logic
+      }
     }
-
-    // Embedメッセージとして送信
-    const embed = new EmbedBuilder()
-      .setColor(Colors.Green)
-      .setTitle('こんにちは！私はNENELoBo(Mini)です🤖')
-      .setDescription(rawText)
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
+  } catch (err) {
+    console.error('interactionCreate handler failed:', err);
+    try { await sendAdminNotification(`interaction handler error: ${err && err.message ? err.message : String(err)}`); } catch (e) { console.error('notify failed:', e); }
   }
-  else if (interaction.commandName === 'report') {
-    const embed = new EmbedBuilder()
-      .setColor(Colors.Orange)
-      .setTitle('不具合報告・認識結果が間違っていた場合はこちらから')
-      .setDescription('[不具合報告フォーム](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header) (Googleフォーム)')
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [embed] });
-}}});
+});
 
 // メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
 client.on('messageCreate', async (message) => {
@@ -112,7 +147,12 @@ client.on('messageCreate', async (message) => {
     for (const attachment of message.attachments.values()) {
       if (attachment.contentType && attachment.contentType.startsWith('image')) {
         try {
-          const response = await fetch(attachment.url);
+          // download attachment with timeout
+          const ac = new AbortController();
+          const dlTimeout = setTimeout(() => ac.abort(), 15000);
+          const response = await fetch(attachment.url, { signal: ac.signal }).catch(err => { throw err; });
+          clearTimeout(dlTimeout);
+          if (!response || !response.ok) throw new Error(`attachment download failed status=${response ? response.status : 'no response'}`);
           const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
 
@@ -120,14 +160,30 @@ client.on('messageCreate', async (message) => {
           form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
           form.append('debug', isDebug ? '1' : '0');
 
+          // OCR request with timeout
+          const ocrAc = new AbortController();
+          const ocrTimeout = setTimeout(() => ocrAc.abort(), 30000);
           const ocrRes = await fetch(OCR_API_URL, {
             method: 'POST',
             body: form,
-            headers: form.getHeaders()
-          });
+            headers: form.getHeaders(),
+            signal: ocrAc.signal
+          }).catch(err => { throw err; });
+          clearTimeout(ocrTimeout);
+
+          const contentType = ocrRes && ocrRes.headers && ocrRes.headers.get ? ocrRes.headers.get('content-type') : '';
           const text = await ocrRes.text();
-          console.log(text);  // ここで HTML が返っていないことを確認
-          const result = JSON.parse(text);
+          console.log('OCR content-type:', contentType);
+          console.log('OCR response (truncated 1000 chars):', text.slice(0, 1000));
+          let result = null;
+          try { result = JSON.parse(text); } catch (err) {
+            const short = text.length > 1000 ? text.slice(0, 1000) + '...[truncated]' : text;
+            const msg = `OCR API returned invalid JSON. status=${ocrRes.status} content-type=${contentType} body=${short}`;
+            console.error(msg, err);
+            await message.reply('OCR APIの応答が予期しない形式でした。管理者に通知しました。');
+            await sendAdminNotification(msg);
+            continue;
+          }
 
           if (result && result.results && result.results.length > 0) {
             if (result.results.length >= 2) {
@@ -214,8 +270,10 @@ client.on('messageCreate', async (message) => {
               await message.reply(reply);
             }
           } else {
-            await message.reply('APIレスポンスにエラーが発生しました。[エラー報告](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header)をお願いします。');
-            console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
+            const errMsg = 'APIレスポンスにエラーが発生しました。resultsが無い、または空配列でした。';
+            console.error(errMsg, result);
+            await message.reply(`${errMsg} 管理者に通知しました。`);
+            await sendAdminNotification(`${errMsg} raw=${JSON.stringify(result).slice(0,1000)}`);
           }
 
           // デバッグ用画像・サマリーがAPIレスポンスに含まれていれば送信
@@ -249,8 +307,9 @@ client.on('messageCreate', async (message) => {
             }
           }
         } catch (err) {
-          await message.reply('OCR処理中にエラーが発生しました。[エラー報告](https://docs.google.com/forms/d/e/1FAIpQLScqHbtMLhsVUS69ckg5QSXRTAhTJ4hJsKKyjmpGLLEnL7jxXw/viewform?usp=header)をお願いします。');
-          console.error(err);
+          console.error('OCR処理中に例外が発生しました:', err);
+          try { await message.reply('OCR処理中にエラーが発生しました。管理者に通知しました。'); } catch (e) { console.error('reply failed:', e); }
+          await sendAdminNotification(`OCR処理中の例外: ${err && err.stack ? err.stack : String(err)}`);
         }
       }
     }
@@ -258,4 +317,24 @@ client.on('messageCreate', async (message) => {
 });
 
 // Botトークンでログイン
-client.login(token);
+// Global process-level error handlers
+process.on('unhandledRejection', async (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  try { await sendAdminNotification(`UnhandledRejection: ${reason && reason.stack ? reason.stack : String(reason)}`); } catch (e) { console.error('notify failed:', e); }
+});
+
+process.on('uncaughtException', async (err) => {
+  console.error('Uncaught Exception:', err);
+  try { await sendAdminNotification(`UncaughtException: ${err && err.stack ? err.stack : String(err)}`); } catch (e) { console.error('notify failed:', e); }
+  // Do not exit automatically here; allow restart manager to handle restarts if desired
+});
+
+if (!token) {
+  console.error('MINI_DISCORD_TOKEN is not set. Bot will not login.');
+  sendAdminNotification && sendAdminNotification('MINI_DISCORD_TOKEN is not set; bot failed to start.');
+} else {
+  client.login(token).catch(async (err) => {
+    console.error('client.login failed:', err);
+    await sendAdminNotification(`Bot login failed: ${err && err.message ? err.message : String(err)}`);
+  });
+}
