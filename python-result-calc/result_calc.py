@@ -26,80 +26,15 @@ logging.basicConfig(
     format='[%(asctime)s] [%(levelname)s] %(message)s',)
 
 app = Flask(__name__)
-
-# Initialize EasyOCR readers once at process startup to avoid per-request model downloads.
-reader_en = None
-reader_jp_en = None
-
-def get_easyocr_cache_dirs():
-    # Possible EasyOCR cache locations
-    dirs = []
-    home = Path.home()
-    dirs.append(home / '.EasyOCR')
-    # Container root user
-    dirs.append(Path('/root/.EasyOCR'))
-    return dirs
-
-def clear_easyocr_cache():
-    dirs = get_easyocr_cache_dirs()
-    for d in dirs:
-        try:
-            if d.exists() and d.is_dir():
-                shutil.rmtree(d)
-                logging.info(f"Cleared EasyOCR cache at: {d}")
-        except Exception as e:
-            logging.warning(f"Failed to clear EasyOCR cache at {d}: {e}")
-
-def log_dependency_versions():
+for _ in range(3):
     try:
-        import pkgutil
-        import importlib
-        versions = {}
-        versions['numpy'] = np.__version__
-        versions['opencv'] = cv2.__version__
-        versions['easyocr'] = getattr(easyocr, '__version__', 'unknown')
-        try:
-            import torch
-            versions['torch'] = torch.__version__
-        except Exception:
-            versions['torch'] = 'not-installed'
-        logging.info(f"Dependency versions: {versions}")
+        reader = easyocr.Reader(['en'], gpu=False)
+        break
     except Exception as e:
-        logging.warning(f"Could not determine dependency versions: {e}")
-
-
-def _init_easyocr_readers(max_retries=3):
-    global reader_en, reader_jp_en
-    # Optional env var to force clear cache on startup
-    if os.environ.get('EASYOCR_CLEAR_CACHE', '').lower() in ('1', 'true', 'yes'):
-        clear_easyocr_cache()
-
-    for attempt in range(max_retries):
-        try:
-            reader_en = easyocr.Reader(['en'], gpu=False)
-            reader_jp_en = easyocr.Reader(['ja', 'en'], gpu=False)
-            logging.info("EasyOCR readers initialized successfully")
-            return
-        except Exception as e:
-            msg = str(e).lower()
-            logging.warning(f"EasyOCR init attempt {attempt+1} failed: {e}")
-            # If we detect a checksum/md5/hash related error, try clearing cache then retry
-            if any(k in msg for k in ('md5', 'checksum', 'hash', 'md-5')):
-                logging.info("Detected model checksum error; clearing EasyOCR cache and retrying")
-                clear_easyocr_cache()
-            time.sleep(5)
-
-    # final attempt without swallowing exception
-    try:
-        reader_en = easyocr.Reader(['en'], gpu=False)
-        reader_jp_en = easyocr.Reader(['ja', 'en'], gpu=False)
-    except Exception as e:
-        logging.error("EasyOCR initialization failed after retries: %s", e)
-        raise
-
-# Log versions and initialize readers at import/startup
-log_dependency_versions()
-_init_easyocr_readers()
+        print("Retrying due to:", e)
+        time.sleep(5)
+else:
+    raise RuntimeError("EasyOCR initialization failed after multiple attempts")
 
 def convert_numpy(obj):
     if isinstance(obj, np.integer):
@@ -243,27 +178,6 @@ def warmup_and_check_all_images():
     for ext in extensions:
         png_files.extend(glob.glob(os.path.join(warmup_dir, ext)))
     png_files = sorted(png_files)
-    # Verify files are readable; move corrupted or unreadable ones to a bad_images folder
-    bad_dir = '/app/data/bad_images'
-    try:
-        os.makedirs(bad_dir, exist_ok=True)
-        verified_files = []
-        for p in png_files:
-            try:
-                img_check = cv2.imread(p, cv2.IMREAD_COLOR)
-                if img_check is None or getattr(img_check, 'size', 0) == 0:
-                    logging.warning(f"[Warmup] 不正または破損した画像を移動します: {p}")
-                    try:
-                        shutil.move(p, os.path.join(bad_dir, os.path.basename(p)))
-                    except Exception as e:
-                        logging.warning(f"[Warmup] 破損ファイルの移動失敗: {p} -> {e}")
-                else:
-                    verified_files.append(p)
-            except Exception as e:
-                logging.warning(f"[Warmup] 画像検証で例外: {p} -> {e}")
-        png_files = verified_files
-    except Exception as e:
-        logging.warning(f"[Warmup] bad_images フォルダ作成失敗: {e}")
     if not png_files:
         logging.warning(f"[Warmup] ファイルが見つかりません: {warmup_dir}")
         return
@@ -639,47 +553,10 @@ def blackout_positions(image, positions):
     return image
 
 def extract_score_with_easyocr(image):
-    # Defensive wrapper around EasyOCR readtext
-    try:
-        if image is None:
-            logging.debug("extract_score_with_easyocr: image is None")
-            return []
-        if not isinstance(image, np.ndarray):
-            logging.debug(f"extract_score_with_easyocr: invalid type {type(image)}")
-            return []
-        if getattr(image, 'size', 0) == 0:
-            logging.debug("extract_score_with_easyocr: image.size == 0")
-            return []
-
-        # Ensure uint8
-        if image.dtype != np.uint8:
-            try:
-                image = image.astype(np.uint8)
-            except Exception:
-                logging.debug("extract_score_with_easyocr: could not cast image to uint8")
-                return []
-
-        # Normalize grayscale/colour channels
-        if image.ndim == 3 and image.shape[2] not in (1, 3):
-            try:
-                image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-            except Exception:
-                logging.debug("extract_score_with_easyocr: channel normalization failed")
-                return []
-
-        rdr = get_easyocr_reader()
-        try:
-            results = rdr.readtext(image, detail=0)
-        except Exception as e:
-            logging.warning(f"EasyOCR readtext error: {e}")
-            return []
-
-        numbers = [re.sub(r'\D', '', text) for text in results]
-        numbers = [num for num in numbers if num]
-        return numbers
-    except Exception as e:
-        logging.exception(f"Unexpected error in extract_score_with_easyocr: {e}")
-        return []
+    results = reader.readtext(image, detail=0)
+    numbers = [re.sub(r'\D', '', text) for text in results]
+    numbers = [num for num in numbers if num]
+    return numbers
 
 def draw_labels(image, perfect_positions, miss_positions, labels=None):
     labeled_image = image.copy()
@@ -708,16 +585,11 @@ def to_float_safe(value, scale=1.0):
     return float(value) / scale
 
 def get_easyocr_reader():
-    # Return the already-initialized global reader (avoid creating new instances).
-    global reader_en
-    if reader_en is None:
-        # fallback: create one (shouldn't usually happen)
-        try:
-            reader_en = easyocr.Reader(['en'], gpu=False)
-        except Exception as e:
-            logging.error(f"EasyOCRの初期化に失敗しました: {e}")
-            raise
-    return reader_en
+    try:
+        return easyocr.Reader(['en'], gpu=False)
+    except Exception as e:
+        logging.error(f"EasyOCRの初期化に失敗しました: {e}")
+        raise
 
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
@@ -764,8 +636,9 @@ def ocr_endpoint():
     song_5top_under_block = song_3top_block[song_4h_top_block // 2:, :]
 
     labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
-    # Use the pre-initialized readers to avoid per-request model downloads
-    results = reader_en.readtext(song_5top_under_block)
+    reader = easyocr.Reader(['en'])
+
+    results = reader.readtext(song_5top_under_block)
 
     found = []
     for (bbox, text, conf) in results:
@@ -789,6 +662,7 @@ def ocr_endpoint():
         song_3top_block = song_3top_block[:, x_global:]
 
     # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
+    reader_jp_en = easyocr.Reader(['ja', 'en'])
     results_full = reader_jp_en.readtext(song_3top_block)
 
     target_labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
@@ -990,15 +864,8 @@ def ocr_endpoint():
                     if debug:
                         _, crop_buf = cv2.imencode('.png', right_half)
                         debug_crop_b64 = base64.b64encode(crop_buf.tobytes()).decode('utf-8')
-                        try:
-                            if preprocessed_right is not None and getattr(preprocessed_right, 'size', 0) > 0:
-                                _, pre_buf = cv2.imencode('.png', preprocessed_right)
-                                debug_pre_b64 = base64.b64encode(pre_buf.tobytes()).decode('utf-8')
-                            else:
-                                debug_pre_b64 = None
-                        except Exception as e:
-                            logging.warning(f"Debug encoding of preprocessed image failed: {e}")
-                            debug_pre_b64 = None
+                        _, pre_buf = cv2.imencode('.png', preprocessed_right)
+                        debug_pre_b64 = base64.b64encode(pre_buf.tobytes()).decode('utf-8')
                         debug_params = {
                             'threshold': threshold,
                             'blur_ksize': blur_ksize,

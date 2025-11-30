@@ -19,12 +19,6 @@ RUN pip install --no-cache-dir \
     numpy==1.26.4 \
     torch==2.1.2 torchvision==0.16.2 \
     -r requirements.txt
-
-# 3. EasyOCRモデルの事前ダウンロード
-# このステップは、pipインストールと同じレイヤーに含めることでキャッシュの有効活用を図れます。
-RUN rm -rf /root/.EasyOCR/model && \
-    python -c "import easyocr; reader = easyocr.Reader(['en'], gpu=False); print('EasyOCR models downloaded.')"
-
 # --- Stage 2: final ---
 FROM python:3.9-slim
 
