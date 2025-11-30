@@ -14,7 +14,12 @@ COPY requirements.txt requirements.txt
 
 # numpyとtorchのバージョンを固定してインストール (torchの依存関係解決を助けるため)
 RUN pip install numpy==1.26.4
-RUN pip install --no-cache-dir torch==2.1.2 torchvision==0.16.2
+ARG INSTALL_TORCH="yes"
+RUN if [ "$INSTALL_TORCH" = "yes" ]; then \
+            pip install --no-cache-dir torch==2.1.2 torchvision==0.16.2 || true; \
+        else \
+            echo "Skipping torch install (INSTALL_TORCH=no)"; \
+        fi
 
 # その他の依存関係をインストール
 # easyocrはこのステップに含まれているはず
@@ -38,4 +43,4 @@ ENV GUNICORN_TIMEOUT=120
 # gunicornの設定ファイルを参照し、result_calcモジュールからappオブジェクトを実行
 # 以前のログで 'result_calc' モジュールが見つからない警告があったため、
 # Gunicornが実行されるこのディレクトリに result_calc.py が存在することを確認してください。
-CMD ["gunicorn", "-b", "0.0.0.0:53744", "--config", "./gunicorn_conf.py", "result-calc:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:53744", "--config", "./gunicorn_conf.py", "result_calc:app"]

@@ -24,12 +24,18 @@ logging.basicConfig(
     format='[%(asctime)s] [%(levelname)s] %(message)s',)
 
 app = Flask(__name__)
+
+# Initialize EasyOCR readers once at process startup to avoid per-request model downloads.
+reader_en = None
+reader_jp_en = None
 for _ in range(3):
     try:
-        reader = easyocr.Reader(['en'], gpu=False)
+        reader_en = easyocr.Reader(['en'], gpu=False)
+        # also prepare Japanese+English reader used for title/difficulty extraction
+        reader_jp_en = easyocr.Reader(['ja', 'en'], gpu=False)
         break
     except Exception as e:
-        print("Retrying due to:", e)
+        print("Retrying EasyOCR initialization due to:", e)
         time.sleep(5)
 else:
     raise RuntimeError("EasyOCR initialization failed after multiple attempts")
@@ -551,7 +557,9 @@ def blackout_positions(image, positions):
     return image
 
 def extract_score_with_easyocr(image):
-    results = reader.readtext(image, detail=0)
+    # Use the globally-initialized English reader to avoid per-request model load.
+    rdr = get_easyocr_reader()
+    results = rdr.readtext(image, detail=0)
     numbers = [re.sub(r'\D', '', text) for text in results]
     numbers = [num for num in numbers if num]
     return numbers
@@ -583,11 +591,16 @@ def to_float_safe(value, scale=1.0):
     return float(value) / scale
 
 def get_easyocr_reader():
-    try:
-        return easyocr.Reader(['en'], gpu=False)
-    except Exception as e:
-        logging.error(f"EasyOCRの初期化に失敗しました: {e}")
-        raise
+    # Return the already-initialized global reader (avoid creating new instances).
+    global reader_en
+    if reader_en is None:
+        # fallback: create one (shouldn't usually happen)
+        try:
+            reader_en = easyocr.Reader(['en'], gpu=False)
+        except Exception as e:
+            logging.error(f"EasyOCRの初期化に失敗しました: {e}")
+            raise
+    return reader_en
 
 @app.route('/ocr', methods=['POST'])
 def ocr_endpoint():
@@ -634,9 +647,8 @@ def ocr_endpoint():
     song_5top_under_block = song_3top_block[song_4h_top_block // 2:, :]
 
     labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
-    reader = easyocr.Reader(['en'])
-
-    results = reader.readtext(song_5top_under_block)
+    # Use the pre-initialized readers to avoid per-request model downloads
+    results = reader_en.readtext(song_5top_under_block)
 
     found = []
     for (bbox, text, conf) in results:
@@ -660,7 +672,6 @@ def ocr_endpoint():
         song_3top_block = song_3top_block[:, x_global:]
 
     # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
-    reader_jp_en = easyocr.Reader(['ja', 'en'])
     results_full = reader_jp_en.readtext(song_3top_block)
 
     target_labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
