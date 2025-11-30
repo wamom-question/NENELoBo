@@ -1,45 +1,54 @@
-# より軽量なPythonイメージを使用
+# --- Stage 1: builder ---
+FROM python:3.9 as builder
+
+# 1. OSパッケージのインストール (tesseract-ocrとビルドに必要なツール)
+# tesseract-ocr は実行時にも必要なのでそのままインストール
+# ただし、torchのインストールにビルドツール（gcc/g++など）が必要な場合、ここで追加
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        # ↓ torch/numpyのビルドが必要な場合にのみ追加（多くの場合不要だが念のため）
+        # build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+
+# 2. 依存関係のインストール (torchを含め、すべてのpip依存関係をここで完結させる)
+RUN pip install --no-cache-dir \
+    numpy==1.26.4 \
+    torch==2.1.2 torchvision==0.16.2 \
+    -r requirements.txt
+
+# 3. EasyOCRモデルの事前ダウンロード
+# このステップは、pipインストールと同じレイヤーに含めることでキャッシュの有効活用を図れます。
+RUN rm -rf /root/.EasyOCR/model && \
+    python -c "import easyocr; reader = easyocr.Reader(['en'], gpu=False); print('EasyOCR models downloaded.')"
+
+# --- Stage 2: final ---
 FROM python:3.9-slim
 
-# OSパッケージのインストール (tesseract-ocr)
+# 1. builderからOSパッケージの環境をコピー (tesseract-ocrのライブラリ)
+# tesseract-ocrと依存ライブラリを実行環境にコピーするために必要
 RUN apt-get update && \
     apt-get install -y --no-install-recommends tesseract-ocr && \
     rm -rf /var/lib/apt/lists/*
-
-# アプリケーションの作業ディレクトリを設定
+    
 WORKDIR /usr/src/app
 
-# 依存関係のインストール (ビルドキャッシュの最適化のため、requirements.txtを先にコピー)
-COPY requirements.txt requirements.txt
+# 2. builderステージからPythonライブラリをコピー
+# site-packages フォルダ全体をコピーします
+COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
 
-# numpyとtorchのバージョンを固定してインストール (torchの依存関係解決を助けるため)
-RUN pip install numpy==1.26.4
-ARG INSTALL_TORCH="yes"
-RUN if [ "$INSTALL_TORCH" = "yes" ]; then \
-            pip install --no-cache-dir torch==2.1.2 torchvision==0.16.2 || true; \
-        else \
-            echo "Skipping torch install (INSTALL_TORCH=no)"; \
-        fi
+# 3. builderステージからEasyOCRモデルをコピー
+# モデルは /root/.EasyOCR/model にあるため、環境変数を考慮して/usr/src/app/.EasyOCR/model などにコピーするのが安全です。
+# ただし、ユーザーがrootである場合、/root/.EasyOCR/model のままコピーできます。
+COPY --from=builder /root/.EasyOCR/model /root/.EasyOCR/model
 
-# その他の依存関係をインストール
-# easyocrはこのステップに含まれているはず
-RUN pip install --no-cache-dir -r requirements.txt
-
-# --- EasyOCRモデルの事前ダウンロード ---
-# /root/.EasyOCR/model にモデルがキャッシュされる
-# このステップは requirements.txt が変更されない限り、キャッシュが効く
-RUN rm -rf /root/.EasyOCR/model
-
-# アプリケーションコードをコピー
+# 4. アプリケーションコードをコピー
 COPY . .
 
-# Default environment variables (can be overridden at runtime)
+# 環境変数とCMDは元の設定を維持
 ENV GUNICORN_WORKERS=2
-ENV GUNICORN_THREADS=4
-ENV GUNICORN_TIMEOUT=120
-
-# Run with gunicorn in production-style mode, reading `app` from result_calc.py
-# gunicornの設定ファイルを参照し、result_calcモジュールからappオブジェクトを実行
-# 以前のログで 'result_calc' モジュールが見つからない警告があったため、
-# Gunicornが実行されるこのディレクトリに result_calc.py が存在することを確認してください。
+# ... (その他ENV)
 CMD ["gunicorn", "-b", "0.0.0.0:53744", "--config", "./gunicorn_conf.py", "result_calc:app"]
