@@ -1,40 +1,32 @@
-# --- Stage 1: builder ---
-FROM python:3.9 as builder
+FROM python:3.9-slim
 
-# 1. OSパッケージのインストール (tesseract-ocrとビルドに必要なツール)
-# tesseract-ocr は実行時にも必要なのでそのままインストール
-# ただし、torchのインストールにビルドツール（gcc/g++など）が必要な場合、ここで追加
+# 1. OSパッケージのインストール (tesseract-ocrと依存ライブラリ)
+# tesseract-ocr 本体と、実行に必要な依存ライブラリをインストールします。
+# slim イメージで apt-get を実行する際は、常に update/cleanup をセットで行い、
+# --no-install-recommends を使用して不要なパッケージを削減します。
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         tesseract-ocr \
-        # ↓ torch/numpyのビルドが必要な場合にのみ追加（多くの場合不要だが念のため）
+        libtesseract5 \
+        # tesseractが依存する可能性のある主要なライブラリ (状況に応じて調整)
+        libleptonica-dev \
+        # numpy/torchがビルドを必要とする場合（通常は不要だが、エラーが出る場合のみ追加）
         # build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /usr/src/app
 COPY requirements.txt .
 
-# 2. 依存関係のインストール (torchを含め、すべてのpip依存関係をここで完結させる)
+# 2. Python依存関係のインストール
+# pip install はキャッシュを使用しない設定(--no-cache-dir)で行い、
+# numpy/torchのバージョンを固定してインストールします。
+# numpyとtorchは通常、ビルド済みホイールが提供されているため、build-essentialは多くの場合不要です。
 RUN pip install --no-cache-dir \
     numpy==1.26.4 \
     torch==2.1.2 torchvision==0.16.2 \
     -r requirements.txt
-# --- Stage 2: final ---
-FROM python:3.9-slim
 
-# 1. builderからOSパッケージの環境をコピー (tesseract-ocrのライブラリ)
-# tesseract-ocrと依存ライブラリを実行環境にコピーするために必要
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends tesseract-ocr && \
-    rm -rf /var/lib/apt/lists/*
-    
-WORKDIR /usr/src/app
-
-# 2. builderステージからPythonライブラリをコピー
-# site-packages フォルダ全体をコピーします
-COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
-
-# 4. アプリケーションコードをコピー
+# 3. アプリケーションコードのコピー
 COPY . .
 
 # 環境変数とCMDは元の設定を維持
