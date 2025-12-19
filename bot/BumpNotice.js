@@ -191,7 +191,7 @@ function getTimeSlotKey(hour) {
 async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
       // Notify Python host for TTS/enqueue
     try {
-      const pythonAppUrl = 'http://host.docker.internal:50030/bump_notify' || 'http://172.18.0.3:50030/bump_notify';
+      const pythonAppUrl = 'http://host.docker.internal:50030/bump_notify';
       const payload = {
         guild_id: guildId,
         message: `Bumpされました！`
@@ -603,7 +603,7 @@ async function sendBumpReminder(client, bumpTime, guildId) {
     });
     // Notify Python host for TTS/enqueue
     try {
-      const pythonAppUrl = 'http://host.docker.internal:50030/bump_notify' || 'http://172.18.0.3:50030/bump_notify';
+      const pythonAppUrl = 'http://host.docker.internal:50030/bump_notify';
       const payload = {
         guild_id: guildId,
         message: `Bumpできます！`
