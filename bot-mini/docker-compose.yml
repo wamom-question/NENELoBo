@@ -6,6 +6,6 @@ services:
     env_file: .env
   #  depends_on:
   #    - python-result-calc
-  #    - python-announce-fetcher
+  #    - announce-fetcher
   #    - bot
     restart: always
