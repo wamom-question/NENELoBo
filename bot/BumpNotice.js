@@ -190,24 +190,31 @@ function getTimeSlotKey(hour) {
 
 async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
       // Notify Python host for TTS/enqueue
-    try {
-      const pythonAppUrl = 'http://host.docker.internal:50030/bump_notify';
-      const payload = {
-        guild_id: guildId,
-        message: `Bumpされました！`
-      };
-      await fetch(pythonAppUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(res => {
-        if (!res.ok) console.error('Python notify responded with', res.status);
-      }).catch(err => {
-        console.error('Failed to notify Python service:', err);
-      });
-    } catch (err) {
-      console.error('Error while sending bump_notify to Python:', err);
-    }
+      const pythonAppUrl = process.env.TO_TTS_BOT_IP;
+
+      if (pythonAppUrl) {
+        try {
+          const payload = {
+            guild_id: guildId,
+            message: `Bumpできます！` // または状況に応じたメッセージ
+          };
+
+          const response = await fetch(pythonAppUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (response.ok) {
+            console.log('✅ Python service notified successfully');
+          } else {
+            console.error(`❌ Python service returned error: ${response.status}`);
+          }
+        } catch (err) {
+          console.error('❌ Failed to notify Python service:', err.message);
+        }
+      }
+    
 
   // ① 次のBump可能時間を計算して保存
   const nextBumpDisplayText = `${bumpTime.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} にまたBumpできます`;
@@ -602,24 +609,32 @@ async function sendBumpReminder(client, bumpTime, guildId) {
       embeds: [createEmbed('Bumpできます！', '`/bump` でサーバーの掲載順を上にできます。')]
     });
     // Notify Python host for TTS/enqueue
-    try {
-      const pythonAppUrl = 'http://host.docker.internal:50030/bump_notify';
-      const payload = {
-        guild_id: guildId,
-        message: `Bumpできます！`
-      };
-      await fetch(pythonAppUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(res => {
-        if (!res.ok) console.error('Python notify responded with', res.status);
-      }).catch(err => {
-        console.error('Failed to notify Python service:', err);
-      });
-    } catch (err) {
-      console.error('Error while sending bump_notify to Python:', err);
-    }
+    const pythonAppUrl = process.env.TO_TTS_BOT_IP;
+
+      if (pythonAppUrl) {
+        try {
+          const payload = {
+            guild_id: guildId,
+            message: `Bumpできます！` // または状況に応じたメッセージ
+          };
+
+          const response = await fetch(pythonAppUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (response.ok) {
+            console.log('✅ Python service notified successfully');
+          } else {
+            console.error(`❌ Python service returned error: ${response.status}`);
+          }
+        } catch (err) {
+          console.error('❌ Failed to notify Python service:', err.message);
+        }
+      }
+
+      
   } catch (err) {
     console.error('❗ Bumpリマインダー送信失敗（スレッド送信時）:', err);
   }
