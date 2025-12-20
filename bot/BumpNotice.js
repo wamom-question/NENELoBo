@@ -708,7 +708,7 @@ export async function handleNextBumpCommand(interaction, client) {
 }
 
 // Function to handle the reminder notification based on nextBumpTime
-export async function sendNextBumpNotification(client, bumpTime, channel) {
+export async function sendNextBumpNotification(client, bumpTime, channel, guildId) {
   const jstDate = new Date(bumpTime.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
   const bumpHour = jstDate.getHours();
   const bumpDay = jstDate.getDay();
