@@ -196,7 +196,7 @@ async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
         try {
           const payload = {
             guild_id: guildId,
-            message: `Bumpできます！` // または状況に応じたメッセージ
+            message: `Bumpされました！`
           };
 
           const response = await fetch(pythonAppUrl, {
