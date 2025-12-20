@@ -723,6 +723,31 @@ export async function sendNextBumpNotification(client, bumpTime, channel) {
       embeds: [createEmbed('Bumpできます！', '`/bump` でサーバーの掲載順を上にできます。')]
     });
 
+    const pythonAppUrl = process.env.TO_TTS_BOT_IP;
+
+      if (pythonAppUrl) {
+        try {
+          const payload = {
+            guild_id: guildId,
+            message: `Bumpできます！` // または状況に応じたメッセージ
+          };
+
+          const response = await fetch(pythonAppUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (response.ok) {
+            console.log('✅ Python service notified successfully');
+          } else {
+            console.error(`❌ Python service returned error: ${response.status}`);
+          }
+        } catch (err) {
+          console.error('❌ Failed to notify Python service:', err.message);
+        }
+      }
+
     // 通知済みフラグを更新
     const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
     nextBumpData.notified = true;
