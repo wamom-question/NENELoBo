@@ -194,8 +194,10 @@ async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
 
       if (pythonAppUrl) {
         try {
+          const resolvedGuildId = guildId || process.env.BUMP_SURVEIL_GUILD;
+          if (!resolvedGuildId) console.warn('⚠️ notify: guildId is undefined and no BUMP_SURVEIL_GUILD fallback set');
           const payload = {
-            guild_id: guildId,
+            guild_id: resolvedGuildId,
             message: `Bumpされました！`
           };
 
@@ -205,10 +207,11 @@ async function handleBumpSuccess(message, bumpFromMain, bumpTime, guildId) {
             body: JSON.stringify(payload)
           });
 
+          const respText = await response.text().catch(() => '');
           if (response.ok) {
-            console.log('✅ Python service notified successfully');
+            console.log('✅ Python service notified successfully:', respText);
           } else {
-            console.error(`❌ Python service returned error: ${response.status}`);
+            console.error(`❌ Python service returned error: ${response.status} - ${respText}`);
           }
         } catch (err) {
           console.error('❌ Failed to notify Python service:', err.message);
@@ -470,7 +473,8 @@ export function setupBumpNoticeHandler(client) {
 
   const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
   if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) <= new Date()) {
-    sendNextBumpNotification(client, new Date(nextBumpData.nextBumpTime), process.env.MAIN_BUMP_CHANNEL_ID);
+    const guildIdForCall = nextBumpData.guildId || process.env.BUMP_SURVEIL_GUILD;
+    sendNextBumpNotification(client, new Date(nextBumpData.nextBumpTime), process.env.MAIN_BUMP_CHANNEL_ID, guildIdForCall);
   } else if (nextBumpData.nextBumpTime && new Date(nextBumpData.nextBumpTime) > new Date()) {
     const { nextBumpTime, guildId } = nextBumpData;
     const start = Date.now();
@@ -573,7 +577,8 @@ async function updateCountdown(countdownMessage, bumpFromMain, bumpTime, guildId
       // 通知処理
       const nextBumpData = readJsonFile(NEXT_BUMP_FILE);
       if (!nextBumpData.notified) {
-          await sendNextBumpNotification(client, bumpTime, process.env.MAIN_BUMP_CHANNEL_ID);
+          const nbGuildId = nextBumpData.guildId || process.env.BUMP_SURVEIL_GUILD;
+          await sendNextBumpNotification(client, bumpTime, process.env.MAIN_BUMP_CHANNEL_ID, nbGuildId);
       }
       try {
         if (countdownMessage && typeof countdownMessage.delete === 'function') {
@@ -590,54 +595,6 @@ async function updateCountdown(countdownMessage, bumpFromMain, bumpTime, guildId
   }
 
   countdown();
-}
-
-// Bumpリマインダー送信処理を分離
-async function sendBumpReminder(client, bumpTime, guildId) {
-  const jstDate = new Date(bumpTime.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-  const bumpHour = jstDate.getHours();
-  const bumpDay = jstDate.getDay();
-  const isHolidayMode = bumpDay === 0 || bumpDay === 6 || await isHoliday(jstDate);
-  const timeKey = getTimeSlotKey(bumpHour);
-  const targetId = (isHolidayMode ? THREAD_MAP.holiday : THREAD_MAP.weekday)[timeKey];
-  console.log(`🕵️‍♂️ 通知シミュレーション: JST=${bumpHour}時, 曜日=${bumpDay}, isHoliday=${isHolidayMode}, スレッドキー=${timeKey}, チャンネルID=${targetId}`);
-
-  try {
-    const targetChannel = await client.channels.fetch(targetId);
-    await targetChannel.send({
-      content: '@here',
-      embeds: [createEmbed('Bumpできます！', '`/bump` でサーバーの掲載順を上にできます。')]
-    });
-    // Notify Python host for TTS/enqueue
-    const pythonAppUrl = process.env.TO_TTS_BOT_IP;
-
-      if (pythonAppUrl) {
-        try {
-          const payload = {
-            guild_id: guildId,
-            message: `Bumpできます！` // または状況に応じたメッセージ
-          };
-
-          const response = await fetch(pythonAppUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          if (response.ok) {
-            console.log('✅ Python service notified successfully');
-          } else {
-            console.error(`❌ Python service returned error: ${response.status}`);
-          }
-        } catch (err) {
-          console.error('❌ Failed to notify Python service:', err.message);
-        }
-      }
-
-      
-  } catch (err) {
-    console.error('❗ Bumpリマインダー送信失敗（スレッド送信時）:', err);
-  }
 }
 
 export async function handleNextBumpCommand(interaction, client) {
@@ -727,8 +684,10 @@ export async function sendNextBumpNotification(client, bumpTime, channel, guildI
 
       if (pythonAppUrl) {
         try {
+          const resolvedGuildId = guildId || process.env.BUMP_SURVEIL_GUILD;
+          if (!resolvedGuildId) console.warn('⚠️ sendNextBumpNotification: guildId is undefined and no BUMP_SURVEIL_GUILD fallback set');
           const payload = {
-            guild_id: guildId,
+            guild_id: resolvedGuildId,
             message: `Bumpできます！` // または状況に応じたメッセージ
           };
 
@@ -738,11 +697,13 @@ export async function sendNextBumpNotification(client, bumpTime, channel, guildI
             body: JSON.stringify(payload)
           });
 
+          const respText = await response.text().catch(() => '');
           if (response.ok) {
-            console.log('✅ Python service notified successfully');
+            console.log('✅ Python service notified successfully:', respText);
           } else {
-            console.error(`❌ Python service returned error: ${response.status}`);
+            console.error(`❌ Python service returned error: ${response.status} - ${respText}`);
           }
+
         } catch (err) {
           console.error('❌ Failed to notify Python service:', err.message);
         }
