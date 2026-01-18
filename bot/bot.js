@@ -502,301 +502,396 @@ async function setMysekaiChannel(eventName) {
   }
 }
 
-// メンション＋画像添付メッセージを検知し、画像をPython OCR APIに送信
+/**
+ * =============================================================
+ * OCR処理の統合ロジック（最適化版）
+ * =============================================================
+ * 目的: メンション + 画像、ocrAlwaysChannel の2パターンを
+ *      統一ロジックで処理し、DRY原則を実現
+ * 
+ * 処理フロー:
+ *  1. 全画像をPromise.allで並列OCR処理
+ *  2. 結果を集約（成功・エラー分離）
+ *  3. 総プレイヤー数で表示形式を動的に切り替え
+ *     - 1人: メッセージ + スコア絵文字リアクション
+ *     - 複数人: Embedテーブル表示（リアクション不要）
+ *     - メドレー: ステータス更新メッセージ
+ * =============================================================
+ */
+
+/**
+ * 単一の画像からOCR APIを呼び出す
+ */
+async function fetchOCRResult(attachmentUrl, options = {}) {
+  const { isDebug = false } = options;
+  const response = await fetch(attachmentUrl);
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  
+  const form = new FormData();
+  form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
+  form.append('debug', isDebug ? '1' : '0');
+
+  const ocrRes = await fetch(OCR_API_URL, {
+    method: 'POST',
+    body: form,
+    headers: form.getHeaders()
+  });
+  return ocrRes.json();
+}
+
+/**
+ * 複数画像に対して並列OCR処理を実行
+ */
+async function processMultipleOCR(attachmentUrls, options = {}) {
+  const promises = attachmentUrls.map(url => 
+    fetchOCRResult(url, options).catch(err => ({
+      error: 'API通信エラー',
+      details: err.message,
+      results: []
+    }))
+  );
+  return Promise.all(promises);
+}
+
+/**
+ * 全OCR結果を集約して、プレイヤー情報を統合
+ * 戻り値: { allPlayers: [{ imageIndex, playerIndex, ...playerData }], errors: [...] }
+ */
+function aggregateOCRResults(ocrResults) {
+  const allPlayers = [];
+  const errors = [];
+
+  ocrResults.forEach((result, imageIndex) => {
+    if (!result || !result.results) {
+      errors.push({ imageIndex, type: 'no_results', message: 'APIレスポンスが無効です' });
+      return;
+    }
+
+    result.results.forEach((player, playerIndex) => {
+      if (player.error) {
+        errors.push({ imageIndex, playerIndex, type: 'player_error', message: player.error });
+      } else {
+        allPlayers.push({ imageIndex, playerIndex, ...player });
+      }
+    });
+  });
+
+  return { allPlayers, errors };
+}
+
+/**
+ * 1人リザルト用の詳細メッセージと絵文字リアクション
+ */
+async function sendSinglePlayerResponse(message, player, isDebug = false, ocrResult = null) {
+  const reply = [
+    `認識結果`,
+    `-# ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`,
+    `-# 「 ${player.song_title} 」  ${player.song_difficulty}  `,
+  ].join('\n');
+
+  const replyMsg = await message.reply(reply);
+
+  // スコア絵文字リアクション
+  if (player.score !== undefined) {
+    const scoreStr = String(player.score);
+    await message.react('<:ocr_score:1389569033874968576>');
+    await new Promise(res => setTimeout(res, 500));
+
+    for (let i = 0; i < scoreStr.length; i++) {
+      const digit = scoreStr[i];
+      const pos = i + 1;
+      const emojiId = process.env[`EMOJI_${digit}_${pos}`];
+      if (emojiId) {
+        await message.react(emojiId);
+        await new Promise(res => setTimeout(res, 500));
+      }
+    }
+  }
+
+  // デバッグ画像送信
+  if (isDebug && ocrResult) {
+    await sendDebugImages(message, ocrResult);
+  }
+
+  return replyMsg;
+}
+
+/**
+ * 複数人リザルト用のEmbed表形式メッセージ
+ */
+async function sendMultiPlayerResponse(message, players) {
+  const fields = ['perfect', 'great', 'good', 'bad', 'miss', 'score'];
+  const labels = ['PERFECT(3)', 'GREAT(2)', 'GOOD(1)', 'BAD(0)', 'MISS(0)', 'score'];
+  const table = fields.map(() => []);
+
+  players.forEach(player => {
+    table[0].push(player.perfect);
+    table[1].push(player.great);
+    table[2].push(player.good);
+    table[3].push(player.bad);
+    table[4].push(player.miss);
+    table[5].push(player.score);
+  });
+
+  let header = '              ' + table[0].map((_, i) => (i + 1).toString().padEnd(4)).join(' ');
+  let lines = [header];
+  for (let i = 0; i < fields.length; i++) {
+    let row = labels[i].padEnd(12) + ': ';
+    row += table[i].map(v => String(v).padEnd(4)).join(' ');
+    lines.push(row);
+  }
+
+  // スコアと精度で順位付け
+  const scores = players.map((p, i) => ({
+    idx: i + 1,
+    score: p.score,
+    weight: p.perfect * 1000 + p.great * 10 + p.good * 5 - p.bad * 100 - p.miss * 500
+  }));
+
+  scores.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.weight - a.weight;
+  });
+
+  const rankLines = [];
+  let currentRank = 1;
+  for (let i = 0; i < scores.length; i++) {
+    const { idx } = scores[i];
+    const player = `Player_${idx}`;
+    if (i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
+      rankLines.push(`## ${currentRank}位    ${player}（同率）`);
+    } else {
+      currentRank = i + 1;
+      const prefix = currentRank === 1 ? '#' : '##';
+      rankLines.push(`${prefix} ${currentRank}位    ${player}`);
+    }
+  }
+
+  const reply = [
+    '### 認識結果',
+    '```',
+    ...lines,
+    '```',
+    ...rankLines
+  ].join('\n');
+
+  return message.reply(reply);
+}
+
+/**
+ * デバッグ用画像を送信
+ */
+async function sendDebugImages(message, ocrResult) {
+  if (ocrResult.debug_image_base64) {
+    const imageBuffer = Buffer.from(ocrResult.debug_image_base64, 'base64');
+    await message.channel.send({
+      content: '（デバッグ用）読み取り部分にラベルをつけた画像です:',
+      files: [{ attachment: imageBuffer, name: 'labeled_result.png' }]
+    });
+  }
+
+  if (ocrResult.results && Array.isArray(ocrResult.results)) {
+    for (const player of ocrResult.results) {
+      if (player.crop_image_base64) {
+        const cropBuf = Buffer.from(player.crop_image_base64, 'base64');
+        await message.channel.send({
+          content: `Player_${player.player} 切り抜き画像`,
+          files: [{ attachment: cropBuf, name: `player${player.player}_crop.png` }]
+        });
+      }
+
+      if (player.simple_preprocess_image_base64 || player.preprocessed_image_base64) {
+        const preBuf = Buffer.from(
+          player.simple_preprocess_image_base64 || player.preprocessed_image_base64,
+          'base64'
+        );
+        const preLabel = player.simple_preprocess_image_base64 ? '簡易前処理画像' : '前処理後画像';
+        await message.channel.send({
+          content: `Player_${player.player} ${preLabel}`,
+          files: [{ attachment: preBuf, name: `player${player.player}_preprocessed.png` }]
+        });
+      }
+
+      if (player.preprocess_params) {
+        await message.channel.send({
+          content: `Player_${player.player} 前処理パラメータ: \n${JSON.stringify(player.preprocess_params, null, 2)}`
+        });
+      }
+    }
+  }
+}
+
+/**
+ * ocrAlwaysChannel用：メドレー計算（複数枚・全て1人リザルト）
+ * 
+ * 形式:
+ * - タイトル: @[ユーザー名] の [枚数]曲メドレースコア
+ * - サブタイトル: 現在の日本時刻
+ * - メイン: 全画像の合計スコアを大きく表示
+ * - 詳細: 「n曲目：曲名 難易度 / スコア / 判定内訳」
+ */
+async function handleMedleyCalculation(message, allPlayers, ocrResults) {
+  const jstNow = new Intl.DateTimeFormat('ja-JP', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZone: 'Asia/Tokyo'
+  }).format(new Date());
+
+  // 各画像ごとにプレイヤー情報を整理
+  const playersByImage = [];
+  for (let i = 0; i < ocrResults.length; i++) {
+    const result = ocrResults[i];
+    if (result && result.results && result.results.length > 0) {
+      playersByImage.push(result.results[0]); // メドレーは各画像1人のみ
+    }
+  }
+
+  const totalScore = playersByImage.reduce((sum, p) => sum + (p.score || 0), 0);
+  const songCount = playersByImage.length;
+
+  const detailLines = playersByImage.map((player, index) => {
+    const trackNum = index + 1;
+    return [
+      `### ${trackNum}曲目「${player.song_title}」${player.song_difficulty}`,
+      `スコア ${player.score.toLocaleString()} / ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`
+    ].join('\n');
+  });
+
+  const medleyMessage = [
+    `# <@${message.author.id}> の ${songCount}曲メドレースコア`,
+    `-# ${jstNow}`,
+    '',
+    `## 🎵 合計スコア ［${totalScore.toLocaleString()}］`,
+    '',
+    ...detailLines
+  ].join('\n');
+
+  await message.reply(medleyMessage);
+}
+
+/**
+ * 統合OCR処理ハンドラ（メンション + ocrAlwaysChannel両対応）
+ */
+async function handleOCRProcessing(message, imageAttachments, options = {}) {
+  const { isDebug = false, isMedley = false } = options;
+
+  if (imageAttachments.length === 0) return;
+
+  try {
+    // ステップ1: 全画像を並列OCR処理
+    const ocrResults = await processMultipleOCR(
+      imageAttachments.map(att => att.url),
+      { isDebug }
+    );
+
+    // ステップ2: 結果を集約
+    const { allPlayers, errors } = aggregateOCRResults(ocrResults);
+
+    // エラーログ
+    if (errors.length > 0 && !isMedley) {
+      console.warn('OCR処理中のエラー:', errors);
+    }
+
+    // ステップ3: プレイヤー数に応じた処理分岐
+    if (allPlayers.length === 0) {
+      // 全て失敗
+      await message.react('<:ocr_error_api:1389800393332101311>');
+      await message.channel.send(`<@${mentionDeveloper}> OCR処理に失敗しました。`);
+      console.error('OCR APIレスポンスが無効です:', ocrResults);
+      return;
+    }
+
+    if (isMedley) {
+      // メドレー計算用（複数枚・全て1人）
+      await handleMedleyCalculation(message, allPlayers, imageAttachments);
+    } else if (allPlayers.length === 1) {
+      // 1人のみ
+      await sendSinglePlayerResponse(message, allPlayers[0], isDebug, ocrResults[allPlayers[0].imageIndex]);
+    } else {
+      // 複数人
+      await sendMultiPlayerResponse(message, allPlayers);
+    }
+
+  } catch (err) {
+    await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
+    await message.channel.send(`<@${mentionDeveloper}>`);
+    console.error('OCR処理の予期しないエラー:', err);
+  }
+}
+
+/**
+ * メンション + 画像の処理
+ */
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (message.mentions.has(client.user, { ignoreEveryone: true }) && message.attachments.size > 0) {
     const isDebug = message.content.toLowerCase().includes('debug');
-    for (const attachment of message.attachments.values()) {
-      if (attachment.contentType && attachment.contentType.startsWith('image')) {
-        try {
-          const response = await fetch(attachment.url);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+    const imageAttachments = [...message.attachments.values()].filter(
+      att => att.contentType && att.contentType.startsWith('image')
+    );
 
-          const form = new FormData();
-          form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
-          form.append('debug', isDebug ? '1' : '0');
-
-          const ocrRes = await fetch(OCR_API_URL, {
-            method: 'POST',
-            body: form,
-            headers: form.getHeaders()
-          });
-          const result = await ocrRes.json();
-
-          if (result && result.results && result.results.length > 0) {
-            if (result.results.length >= 2) {
-              // 2人以上なら表形式＋順位でまとめて返信
-              const fields = ['perfect', 'great', 'good', 'bad', 'miss', 'score'];
-              const labels = [
-                'PERFECT(3)', 'GREAT(2)', 'GOOD(1)', 'BAD(0)', 'MISS(0)', 'score'
-              ];
-              const table = fields.map(() => []);
-              result.results.forEach(player => {
-                table[0].push(player.perfect);
-                table[1].push(player.great);
-                table[2].push(player.good);
-                table[3].push(player.bad);
-                table[4].push(player.miss);
-                table[5].push(player.score);
-              });
-
-              let header = '              ' + table[0].map((_, i) => (i+1).toString().padEnd(4)).join(' ');
-              let lines = [header];
-              for (let i = 0; i < fields.length; i++) {
-                let row = labels[i].padEnd(12) + ': ';
-                row += table[i].map(v => String(v).padEnd(4)).join(' ');
-                lines.push(row);
-              }
-
-              // スコアと精度で順位付け（①スコア優先、③同点なら同順位）
-              const scores = result.results.map((p, i) => ({
-                idx: i + 1,
-                score: p.score,
-                weight: p.perfect * 1000 + p.great * 10 + p.good * 5 - p.bad * 100 - p.miss * 500
-              }));
-
-              // スコア → 重み付き精度 でソート
-              scores.sort((a, b) => {
-                if (b.score !== a.score) return b.score - a.score;
-                return b.weight - a.weight;
-              });
-
-              const rankLines = [];
-              let currentRank = 1;
-              for (let i = 0; i < scores.length; i++) {
-                const { idx, score, weight } = scores[i];
-                const player = `Player_${idx}`;
-                if (i > 0 && scores[i].score === scores[i - 1].score && scores[i].weight === scores[i - 1].weight) {
-                  // 同点なら順位維持（③）
-                  rankLines.push(`## ${currentRank}位    ${player}（同率）`);
-                } else {
-                  currentRank = i + 1;
-                  const prefix = currentRank === 1 ? '#' : '##';
-                  rankLines.push(`${prefix} ${currentRank}位    ${player}`);
-                }
-              }
-
-              const reply = [
-                '### 認識結果',
-                '```',
-                ...lines,
-                '```',
-                ...rankLines
-              ].join('\n');
-              await message.reply(reply);
-            } else {
-              // 1人だけなら従来通り
-              let reply = result.results.map(player => {
-                if (player.error) {
-                    return `Player_${player.player}: 認識失敗 (${player.error})`;
-                } else {
-                  return [
-                    `### Player_${player.player} 認識結果`,
-                    '```',
-                    `PERFECT(3)  : ${player.perfect}`,
-                    `GREAT(2)    : ${player.great}`,
-                    `GOOD(1)     : ${player.good}`,
-                    `BAD(0)      : ${player.bad}`,
-                    `MISS(0)     : ${player.miss}`,
-                    '```',
-                    '',
-                    `## ランクマスコア  ${player.score}`
-                  ].join('\n');
-                }
-              }).join('\n\n');
-              await message.reply(reply);
-            }
-          } else {
-            await message.react('<:ocr_error_api:1389800393332101311>');
-            await message.channel.send(`<@${mentionDeveloper}>`);
-            console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
-          }
-
-          // デバッグ用画像・サマリーがAPIレスポンスに含まれていれば送信
-          if (isDebug && result.debug_image_base64) {
-            // Base64データをBufferに変換してDiscordに送信
-            const imageBuffer = Buffer.from(result.debug_image_base64, 'base64');
-            await message.channel.send({ content: '（デバッグ用）読み取り部分にラベルをつけた画像です:', files: [{ attachment: imageBuffer, name: 'labeled_result.png' }] });
-          }
-          // 各プレイヤーのデバッグ画像・パラメータも送信
-          if (isDebug && result.results && Array.isArray(result.results)) {
-            for (const player of result.results) {
-              if (player.crop_image_base64) {
-                const cropBuf = Buffer.from(player.crop_image_base64, 'base64');
-                await message.channel.send({ content: `Player_${player.player} 切り抜き画像`, files: [{ attachment: cropBuf, name: `player${player.player}_crop.png` }] });
-              }
-              // Prefer simple_preprocess_image_base64 if present, fall back to preprocessed_image_base64
-              if (player.simple_preprocess_image_base64 || player.preprocessed_image_base64) {
-                const preBuf = Buffer.from(
-                  player.simple_preprocess_image_base64 || player.preprocessed_image_base64,
-                  'base64'
-                );
-                const preLabel = player.simple_preprocess_image_base64 ? '簡易前処理画像' : '前処理後画像';
-                await message.channel.send({
-                  content: `Player_${player.player} ${preLabel}`,
-                  files: [{ attachment: preBuf, name: `player${player.player}_preprocessed.png` }]
-                });
-              }
-              if (player.preprocess_params) {
-                await message.channel.send({ content: `Player_${player.player} 前処理パラメータ: \n${JSON.stringify(player.preprocess_params, null, 2)}` });
-              }
-            }
-          }
-        } catch (err) {
-          await message.reply('OCR処理中にエラーが発生しました。管理者にご連絡ください。');
-          await message.channel.send(`<@${mentionDeveloper}>`);
-          console.error(err);
-        }
-      }
+    if (imageAttachments.length > 0) {
+      await handleOCRProcessing(message, imageAttachments, { isDebug });
     }
   }
 });
 
-// ocrAlwaysChannelId で画像付きメッセージが送信された場合にOCR APIへ送信
+/**
+ * ocrAlwaysChannel の処理（メドレー計算含む）
+ */
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (ocrAlwaysChannelIds.includes(message.channel.id) && message.attachments.size > 0) {
-    const imageAttachments = [...message.attachments.values()].filter(att => att.contentType && att.contentType.startsWith('image'));
-    const isMultipleImages = imageAttachments.length >= 2;
-        if (isMultipleImages) {
-      const results = [];
+    const imageAttachments = [...message.attachments.values()].filter(
+      att => att.contentType && att.contentType.startsWith('image')
+    );
 
-      for (const attachment of imageAttachments) {
-        try {
-          const response = await fetch(attachment.url);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
+    if (imageAttachments.length === 0) return;
 
-          const form = new FormData();
-          form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
+    try {
+      // 全てのOCR処理を実行
+      const ocrResults = await processMultipleOCR(
+        imageAttachments.map(att => att.url),
+        { isDebug: false }
+      );
 
-          const ocrRes = await fetch(OCR_API_URL, {
-            method: 'POST',
-            body: form,
-            headers: form.getHeaders()
-          });
+      // メドレー判定：複数枚かつ各画像が「ちょうど1人」のリザルトか
+      const isMedley = 
+        imageAttachments.length >= 2 &&
+        ocrResults.every(result => 
+          result && result.results && result.results.length === 1 && !result.results[0].error
+        );
 
-          const result = await ocrRes.json();
-          results.push(result);
-        } catch (err) {
-          results.push({ error: 'API_ERROR' });
+      if (isMedley) {
+        // メドレー計算用
+        await handleMedleyCalculation(message, null, ocrResults);
+      } else {
+        // 通常のOCR処理（複数人リザルトやエラーが含まれている）
+        const { allPlayers } = aggregateOCRResults(ocrResults);
+        
+        if (allPlayers.length === 0) {
+          await message.react('<:ocr_error_api:1389800393332101311>');
+          await message.channel.send(`<@${mentionDeveloper}> OCR処理に失敗しました。`);
+          return;
         }
-      }
 
-      for (const result of results) {
-        if (result && result.results && result.results.length === 1) {
-          const player = result.results[0];
-          if (player.error) {
-            if (player.error.startsWith('数値変換に失敗')) {
-              await message.channel.send('<:ocr_error_convert:1389568868493561967>');
-              await message.channel.send(`<@${mentionDeveloper}>`);
-            } else if (player.error === 'スコア認識に失敗') {
-              await message.channel.send('<:ocr_error_score:1389573918825775145>');
-              await message.channel.send(`<@${mentionDeveloper}>`);
-            } else {
-              await message.channel.send('<:ocr_error:1389568660401684500>');
-              await message.channel.send(`<@${mentionDeveloper}>`);
-            }
-          } else {
-            let reply = `-# 認識結果 ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`;
-            const replyMsg = await message.reply(reply);
-            const scoreStr = String(player.score);
-            await replyMsg.react('<:ocr_score:1389569033874968576>');
-            await new Promise(res => setTimeout(res, 500));
-            for (let i = 0; i < scoreStr.length; i++) {
-              const digit = scoreStr[i];
-              const pos = i + 1;
-              const emojiId = process.env[`EMOJI_${digit}_${pos}`];
-              if (emojiId) {
-                await replyMsg.react(emojiId);
-                await new Promise(res => setTimeout(res, 500));
-              }
-            }
-          }
+        if (allPlayers.length === 1) {
+          // 1人のみ
+          await sendSinglePlayerResponse(message, allPlayers[0], false, ocrResults[allPlayers[0].imageIndex]);
         } else {
-          await message.channel.send('<:ocr_error_api:1389800393332101311>');
-          await message.channel.send(`<@${mentionDeveloper}>`);
+          // 複数人
+          await sendMultiPlayerResponse(message, allPlayers);
         }
       }
-      return;
-    }
-    for (const attachment of imageAttachments) {
-        try {
-          const response = await fetch(attachment.url);
-          const arrayBuffer = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          const isDebug = false; // or true
-          const form = new FormData();
-          form.append('image', buffer, { filename: 'image.png', contentType: 'image/png' });
-          form.append('debug', isDebug ? '1' : '0');
 
-          const ocrRes = await fetch(OCR_API_URL, {
-            method: 'POST',
-            body: form,
-            headers: form.getHeaders()
-          });
-          const result = await ocrRes.json();
-
-          if (result && result.results && result.results.length > 0) {
-            if (result.results.length >= 2) {
-              // 2人以上ならメンションしてもう一度送るようにリアクション
-              await message.react('<:ocr_error_2player:1389581609883406336>');
-              await new Promise(res => setTimeout(res, 500));
-              await message.react('<:ocr_error_info_mention:1389581588995768472>');
-            } else {
-              // 1人だけならスコアを桁ごとに分解してカスタム絵文字でリアクション（0埋めせず実際の桁数のみ）
-              const player = result.results[0];
-              if (player.error) {
-                if (player.error.startsWith('数値変換に失敗')) {
-                  await message.react('<:ocr_error_convert:1389568868493561967>');
-                  await message.channel.send('${mentionDeveloper} ');
-                } else if (player.error === 'スコア認識に失敗') {
-                  await message.react('<:ocr_error_score:1389573918825775145>');
-                  await message.channel.send('${mentionDeveloper} ');
-                } else {
-                  // その他のエラー
-                  await message.react('<:ocr_error:1389568660401684500>');
-                  await message.channel.send('${mentionDeveloper} ');
-                }
-              } else {
-                // スコアを左から右へ桁ごとに分解し、各桁・数字に対応するカスタム絵文字IDでリアクション
-                const scoreStr = String(player.score);
-                  await message.react('<:ocr_score:1389569033874968576>');
-                  await new Promise(res => setTimeout(res, 500));
-                for (let i = 0; i < scoreStr.length; i++) {
-                  const digit = scoreStr[i];
-                  const pos = i + 1; // 1始まり
-                  const emojiId = process.env[`EMOJI_${digit}_${pos}`];
-                  if (emojiId) {
-                    await message.react(emojiId);
-                    await new Promise(res => setTimeout(res, 500));
-                  }
-                }
-              }
-              // replyは従来通り
-              let reply = [
-                `認識結果`,
-                `-# ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`,
-                `-# 「 ${player.song_title} 」  ${player.song_difficulty}  `,
-              ].join('\n');
-              await message.reply(reply);
-            }
-          } else {
-            await message.react('<:ocr_error_api:1389800393332101311>');
-            await message.channel.send(`<@${mentionDeveloper}>`);
-            console.error('OCR APIレスポンスにresultsが無い、または空配列です:', result);
-          }
-        } catch (err) {
-          await message.reply('OCRが起動していない可能性があります。しばらくしてから再度お試しください。');
-          await message.channel.send(`<@${mentionDeveloper}>`);
-          console.error(err);
-        }
-      }
+    } catch (err) {
+      await message.reply('OCRが起動していない可能性があります。しばらくしてから再度お試しください。');
+      await message.channel.send(`<@${mentionDeveloper}>`);
+      console.error(err);
     }
   }
-);
+});
 
 // Botトークンでログイン
 client.login(token);
