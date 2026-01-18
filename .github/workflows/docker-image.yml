@@ -6,12 +6,42 @@ on:
       - main
 
 jobs:
-  build-and-push:
+  # 変更されたディレクトリを検知するジョブ
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      # 各サービスに変更があったかどうかのフラグを抽出
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
+      - name: Check for file changes
+        id: filter
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            bot:
+              - 'bot/**'
+            announce-fetcher:
+              - 'announce-fetcher/**'
+            python-result-calc:
+              - 'python-result-calc/**'
+            bot-mini:
+              - 'bot-mini/**'
+            assetdata-downloader:
+              - 'assetdata-downloader/**'
+
+  # 変更があったサービスのみをビルド・プッシュするジョブ
+  build-and-push:
+    needs: changes
+    # 変更されたサービスが1つ以上ある場合のみ実行
+    if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [bot, announce-fetcher, python-result-calc, bot-mini ,assetdata-downloader]
+        # 変更があったサービスのリストを動的に行列に適用
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
 
     steps:
       - name: Checkout repository
@@ -31,5 +61,5 @@ jobs:
           file: ./${{ matrix.service }}/Dockerfile
           push: true
           tags: |
-           ghcr.io/wamom-question/nenelobo/${{ matrix.service }}:latest
-           ghcr.io/wamom-question/nenelobo/${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/wamom-question/nenelobo/${{ matrix.service }}:latest
+            ghcr.io/wamom-question/nenelobo/${{ matrix.service }}:${{ github.sha }}
