@@ -753,16 +753,16 @@ async function handleMedleyCalculation(message, allPlayers, ocrResults) {
   const detailLines = playersByImage.map((player, index) => {
     const trackNum = index + 1;
     return [
-      `### ${trackNum}曲目「${player.song_title}」${player.song_difficulty}`,
-      `スコア ${player.score.toLocaleString()} / ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`
+      `**${trackNum} ** 曲目「 ** ${player.song_title} ** 」${player.song_difficulty}`,
+      `-# スコア ${player.score.toLocaleString()} / ${player.perfect} - ${player.great} - ${player.good} - ${player.bad} - ${player.miss}`
     ].join('\n');
   });
 
   const medleyMessage = [
-    `# <@${message.author.id}> の ${songCount}曲メドレースコア`,
+    `## <@${message.author.id}> の ${songCount}曲メドレースコア`,
     `-# ${jstNow}`,
     '',
-    `## 🎵 合計スコア ［${totalScore.toLocaleString()}］`,
+    `### 🎵 合計スコア ［${totalScore.toLocaleString()}］`,
     '',
     ...detailLines
   ].join('\n');
@@ -873,7 +873,7 @@ client.on('messageCreate', async (message) => {
         if (allPlayers.length === 0) {
           await message.react('<:ocr_error_api:1389800393332101311>');
           await message.channel.send(`<@${mentionDeveloper}> OCR処理に失敗しました。`);
-          return;
+          return; 
         }
 
         if (allPlayers.length === 1) {
