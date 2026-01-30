@@ -1,3 +1,6 @@
+import cv2
+import numpy as np
+
 def extract_perfect_miss_positions(image):
     def get_saved_params():
         saved_params = []
@@ -8,452 +11,97 @@ def extract_perfect_miss_positions(image):
             cur = conn.cursor()
             cur.execute("""
                 SELECT *,
-                    CASE WHEN total_count = 0 THEN 0 ELSE CAST(success_count AS FLOAT)/total_count END AS success_rate
-                FROM warmup_params
-                WHERE total_count > 0
-                ORDER BY success_rate DESC
-                LIMIT 10
+                    CASE WHEN total_count = 0 THEN 0 ELSE CAST(success_count AS FLOAT)/total_count 
+            FROM warmup_success_params
             """)
-            saved_params = [dict(row) for row in cur.fetchall()]
-            conn.close()
-        except Exception as e:
-            logging.warning(f"[extract] SQLite 読み込み失敗: {e}")
+            rows = cur.fetchall()
+            for row in rows:
+                saved_params.append({
+                    'label': row['label'],
+                    'template': cv2.imread(row['template_path'], cv2.IMREAD_GRAYSCALE),
+                    'offset_x': row['offset_x'],
+                    'offset_y': row['offset_y']
+                })
+        except sqlite3.Error as e:
+            print(f"SQLite error: {e}")
         return saved_params
 
-    def detect_positions(img):
-        details = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
-        perfect_positions = []
-        miss_positions = []
-        perfect_text_positions = []
-
-        for i, word in enumerate(details["text"]):
-            if "ALL" in word.upper():
-                if (
-                    i + 1 < len(details["text"])
-                    and "PERFECT" in details["text"][i + 1].upper()
-                ):
-                    x = details["left"][i]
-                    y = details["top"][i]
-                    w = details["width"][i] + details["width"][i + 1]
-                    h = max(details["height"][i], details["height"][i + 1])
-                    perfect_text_positions.append((x, y, w, h))
-
-        blackout_img = img.copy()
-        for x, y, w, h in perfect_text_positions:
-            cv2.rectangle(blackout_img, (x, y), (x + w, y + h), (0, 0, 0), -1)
-
-        details2 = pytesseract.image_to_data(
-            blackout_img, output_type=pytesseract.Output.DICT
-        )
-        for i, word in enumerate(details2["text"]):
-            if "PERFECT" in word.upper():
-                (x, y, w, h) = (
-                    details2["left"][i],
-                    details2["top"][i],
-                    details2["width"][i],
-                    details2["height"][i],
-                )
-                perfect_positions.append((x, y, w, h))
-            if "MISS" in word.upper():
-                (x, y, w, h) = (
-                    details2["left"][i],
-                    details2["top"][i],
-                    details2["width"][i],
-                    details2["height"][i],
-                )
-                miss_positions.append((x, y, w, h))
-        return perfect_positions, miss_positions
-
-    # 1回目（簡易前処理）
-    if len(image.shape) == 2:
-        preprocessed_img = image.copy()
-    else:
-        preprocessed_img = preprocess_image_for_ocr_simple(image)
-    perfects, misses = detect_positions(preprocessed_img)
-    if perfects or misses:
-        return perfects, misses
-
-    # 2回目（SQLiteからパラメータ取得して再前処理）
-    saved_params = get_saved_params()
+    def detect_positions(img, template):
+        result = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
+        threshold = 0.8
+        loc = np.where(result >= threshold)
+        positions = []
+        for pt in zip(*loc[::-1]):
+            x, y = pt
+            positions.append((x + offset_x, y + offset_y))
+        return positions
 
     def to_int_safe(val):
-        if isinstance(val, bytes):
-            return int.from_bytes(val, byteorder="little")
-        return int(val)
-
-    for params in saved_params:
         try:
-            blur_ksize = to_int_safe(params.get("blur", 0))
-            threshold = to_int_safe(params.get("threshold", 128))
-            contrast_scaled = to_int_safe(params.get("contrast_scaled", 10))
-            resize_ratio_scaled = to_int_safe(params.get("resize_ratio_scaled", 10))
-            contrast = stored_int_to_float(contrast_scaled)
-            resize_ratio = stored_int_to_float(resize_ratio_scaled)
-            gaussian_blur = to_int_safe(params.get("gaussian_blur", 0))
-            use_clahe = bool(params.get("use_clahe", False))
+            return int(val)
+        except ValueError:
+            return 0
 
-            processed = preprocess_image_for_ocr(
-                image,
-                threshold,
-                blur_ksize,
-                contrast,
-                resize_ratio,
-                gaussian_blur_ksize=gaussian_blur,
-                use_clahe=use_clahe,
-            )
-            perfects, misses = detect_positions(processed)
-            if perfects or misses:
-                return perfects, misses
-        except Exception as e:
-            logging.warning(f"[extract retry] 再処理エラー: {e}")
+    saved_params = get_saved_params()
+    perfect_positions = []
+    miss_positions = []
 
-    return [], []
+    for param in saved_params:
+        label = param['label']
+        template = param['template']
+        offset_x = param['offset_x']
+        offset_y = param['offset_y']
 
+        positions = detect_positions(image, template)
+        if label == 'PERFECT':
+            perfect_positions.extend(positions)
+        elif label == 'MISS':
+            miss_positions.extend(positions)
+
+    return perfect_positions, miss_positions
 
 def blackout_positions(image, positions):
-    for x, y, w, h in positions:
-        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 0, 0), -1)
+    for x, y in positions:
+        cv2.rectangle(image, (x - 10, y - 10), (x + 50, y + 50), (0, 0, 0), -1)
     return image
 
-
 def extract_score_with_easyocr(image):
-    results = reader.readtext(image, detail=0)
-    numbers = [re.sub(r"\D", "", text) for text in results]
-    numbers = [num for num in numbers if num]
-    return numbers
-
+    # EasyOCRの処理を削除
+    pass
 
 def draw_labels(image, perfect_positions, miss_positions, labels=None):
-    labeled_image = image.copy()
-    for idx, (perfect_pos, miss_pos) in enumerate(
-        zip(perfect_positions, miss_positions)
-    ):
-        _, y_perfect, _, h_perfect = perfect_pos
-        _, y_miss, _, h_miss = miss_pos
-        base_length = (y_miss + h_miss) - y_perfect
-        square_width = int(base_length * 1.3)
-        square_height = int(base_length * 1.2)
-        x_perfect, y_perfect, _, _ = perfect_pos
-        x_label = max(0, x_perfect - int(base_length * 0.1))
-        y_label = max(0, y_perfect - int(base_length * 0.1))
-        cv2.rectangle(
-            labeled_image,
-            (x_label, y_label),
-            (x_label + square_width, y_label + square_height),
-            (0, 255, 0),
-            2,
-        )
-        label_text = labels[idx] if labels and idx < len(labels) else f"{idx + 1}"
-        cv2.putText(
-            labeled_image,
-            label_text,
-            (x_label + 5, y_label + 25),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 0, 255),
-            2,
-        )
-    return labeled_image
-
+    for x, y in perfect_positions:
+        cv2.putText(image, 'PERFECT', (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    for x, y in miss_positions:
+        cv2.putText(image, 'MISS', (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    return image
 
 def to_int_safe(value):
-    if isinstance(value, bytes):
-        return int.from_bytes(value, byteorder="little")
-    return int(value)
-
+    try:
+        return int(value)
+    except ValueError:
+        return 0
 
 def to_float_safe(value, scale=1.0):
-    if isinstance(value, bytes):
-        return int.from_bytes(value, byteorder="little") / scale
-    return float(value) / scale
-
+    try:
+        return float(value) * scale
+    except ValueError:
+        return 0.0
 
 def get_easyocr_reader():
-    try:
-        return easyocr.Reader(["en"], gpu=False)
-    except Exception as e:
-        logging.error(f"EasyOCRの初期化に失敗しました: {e}")
-        raise
-
+    # EasyOCRのリーダーを削除
+    pass
 
 @app.route("/ocr", methods=["POST"])
 def ocr_endpoint():
-    if "image" not in request.files:
-        logging.error("No image uploaded")
-        return jsonify({"error": "No image uploaded"}), 400
+    if request.method == "POST":
+        file = request.files['image']
+        image = cv2.imdecode(np.frombuffer(file.read(), np.uint8), cv2.IMREAD_COLOR)
+        perfect_positions, miss_positions = extract_perfect_miss_positions(image)
+        result_image = blackout_positions(image, perfect_positions + miss_positions)
+        result_image = draw_labels(result_image, perfect_positions, miss_positions)
 
-    file = request.files["image"]
-
-    # MIMEタイプチェック
-    if file.mimetype not in ["image/png", "image/jpeg"]:
-        logging.error("Invalid file type")
-        return jsonify(
-            {"error": "Invalid file type. Only PNG and JPEG are allowed."}
-        ), 400
-
-    # 最大ファイルサイズのチェック
-    if file.content_length > 10 * 1024 * 1024:
-        logging.error("File too large")
-        return jsonify({"error": "File too large. Maximum size is 10MB."}), 400
-
-    try:
-        in_memory_file = BytesIO()
-        file.save(in_memory_file)
-        data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
-        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-
-        if img is None:
-            logging.error("Image could not be decoded")
-            return jsonify({"error": "Could not decode the image."}), 400
-
-        logging.info(f"Image loaded successfully: img.shape={img.shape}")
-    except Exception as e:
-        logging.error(f"Error processing image: {str(e)}")
-        return jsonify({"error": "An error occurred while processing the image."}), 500
-
-    logging.info(
-        f"画像読み込み成功: img.shape={img.shape if img is not None else 'None'}"
-    )
-    # debug フラグはクエリ引数またはフォームから受け取れる（例: ?debug=1）
-    debug_param = request.args.get("debug", request.form.get("debug", "0"))
-    debug = str(debug_param).lower() in ("1")
-    song_h, song_w = img.shape[:2]
-    song_1left = img[:, : song_w // 2]
-    song_2h_left = song_1left.shape[0]
-    song_3top_block = song_1left[: song_2h_left // 6, :]
-    song_4h_top_block = song_3top_block.shape[0]
-    song_5top_under_block = song_3top_block[song_4h_top_block // 2 :, :]
-
-    labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
-    reader = easyocr.Reader(["en"])
-
-    results = reader.readtext(song_5top_under_block)
-
-    found = []
-    for bbox, text, conf in results:
-        text_up = text.upper()
-        if text_up in labels:
-            # bbox = [ [x1,y1], [x2,y2], [x3,y3], [x4,y4] ]
-            x_left = min(p[0] for p in bbox)
-            found.append((text_up, x_left, conf))
-
-    # 最も確度の高いラベルを取る
-    if found:
-        found.sort(key=lambda x: x[2], reverse=True)
-        label, x_local, conf = found[0]
-
-        # song_5top_under_block の原点が song_3top_block 由来であることを反映
-        # song_3top_block は song_1left の [0 : song_2h_left//6, :]
-        # song_1left は img の [:, :song_w//2]
-        x_global = x_local - 50  # 左半分の中での X → 元画像でも同じ
-
-        # x_local を基準に song_3top_block を右端まで切り抜く
-        song_3top_block = song_3top_block[:, x_global:]
-
-    # 日本語 + 英語モードで song_3top_block を OCR し、3つのラベル（難易度・レベル値・曲名）を抽出
-    reader_jp_en = easyocr.Reader(["ja", "en"])
-    results_full = reader_jp_en.readtext(song_3top_block)
-
-    target_labels = ["EASY", "NORMAL", "HARD", "EXPERT", "MASTER", "APPEND"]
-
-    difficulty_info = None
-    numeric_candidates = []
-    other_texts = []
-
-    for bbox, text, conf in results_full:
-        y_center = sum(p[1] for p in bbox) / 4
-        text_up = text.upper()
-
-        if text_up in target_labels:
-            difficulty_info = (text_up, y_center, bbox)
-        else:
-            # 数字ラベル候補
-            if re.fullmatch(r"\d+(\.\d+)?", text.strip()):
-                numeric_candidates.append((text.strip(), y_center, bbox))
-            else:
-                other_texts.append((text.strip(), y_center, bbox))
-
-    song_difficulty = None
-    song_level = None
-    song_title = None
-
-    if difficulty_info:
-        _, diff_y, _ = difficulty_info
-        song_difficulty = difficulty_info[0]
-
-        # レベル（数字）は難易度と最も y が近いもの
-        if numeric_candidates:
-            numeric_candidates.sort(key=lambda x: abs(x[1] - diff_y))
-            numeric_text = numeric_candidates[0][0]
-            numbers = re.findall(r"\d+", numeric_text)
-            song_level = numbers[-1] if numbers else None
-
-        # 曲名は難易度と最も y が遠いもの
-        if other_texts:
-            other_texts.sort(key=lambda x: abs(x[1] - diff_y), reverse=True)
-            target = other_texts[0][0]
-
-        titles = []
-        json_file_path = "/app/assets/musics.json"
-
-        # JSONファイルを読み込む
-        with open(json_file_path, encoding="utf-8") as f:
-            data = json.load(f)
-            titles = [song["title"] for song in data]
-
-        best_title = None
-        best_distance = float("inf")
-
-        for title in titles:
-            dist = Levenshtein.distance(target, title)  # 通常のレーベンシュタイン距離
-            if dist < best_distance:
-                best_distance = dist
-                best_title = title
-        song_title = best_title
-        logging.info("曲名: {} (精度: {})".format(song_title, best_distance))
-
-    else:
-        label, x_local, x_global = None, None, None
-        song_difficulty = None
-        song_level = None
-        song_title = None
-
-    # 画像のアスペクト比を調整して中央切り抜き
-    h, w = img.shape[:2]
-    target_w = int(5 / 3 * h)
-    target_h = int(3 / 5 * w)
-    if w > target_w:
-        # 幅が広すぎる場合、中央から target_w の幅で切り抜き
-        x_start = (w - target_w) // 2
-        img = img[:, x_start : x_start + target_w]
-        w = target_w
-    if h > target_h:
-        # 高さが高すぎる場合、中央から target_h の高さで切り抜き
-        y_start = (h - target_h) // 2
-        img = img[y_start : y_start + target_h, :]
-        h = target_h
-    # 1800x1080にリサイズ
-    img = cv2.resize(img, (1800, 1080), interpolation=cv2.INTER_AREA)
-    processed_img = img.copy()
-    all_perfect_positions, all_miss_positions = [], []
-    label_regions = []
-    logging.info("perfect/miss 抽出処理開始")
-    for _ in range(5):
-        perfect_positions, miss_positions = extract_perfect_miss_positions(
-            processed_img
-        )
-        all_perfect_positions.extend(perfect_positions)
-        all_miss_positions.extend(miss_positions)
-        if perfect_positions and miss_positions:
-            break
-        processed_img = blackout_positions(processed_img, perfect_positions)
-        processed_img = blackout_positions(processed_img, miss_positions)
-    for perfect_pos, miss_pos in zip(all_perfect_positions, all_miss_positions):
-        x_perfect, y_perfect, _, _ = perfect_pos
-        _, y_miss, _, h_miss = miss_pos
-        base_length = (y_miss + h_miss) - y_perfect
-        square_width = int(base_length * 1.3)
-        square_height = int(base_length * 1.2)
-        x_label = max(0, x_perfect - int(base_length * 0.1))
-        y_label = max(0, y_perfect - int(base_length * 0.1))
-        label_regions.append((x_label, y_label, square_width, square_height))
-    label_regions.sort(key=lambda r: r[0])
-    logging.info(
-        f"抽出された perfect/miss の数: {len(all_perfect_positions)} / {len(all_miss_positions)}"
-    )
-    logging.info(f"生成されたラベル領域数: {len(label_regions)}")
-    if not label_regions:
-        logging.warning("ラベル領域が 0 件だったためスコア認識処理をスキップします")
-    all_player_scores = []
-    player_number = 1
-    summary_lines = []
-
-    # SQLiteから最も安定しているパラメータを取得（成功率＝success_count/total_countが最大）
-    saved_params = []
-    db_path = "/app/data/warmup_success_params.sqlite"
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        # 成功率でソート（total_count=0防止にCASE文）、上位10件取得
-        cur.execute("""
-            SELECT *,
-                CASE
-                    WHEN total_count = 0 THEN 0
-                    ELSE (CAST(success_count AS FLOAT) / total_count) *
-                        (CAST(success_count AS FLOAT) / (success_count + 5))
-                END AS weighted_score
-            FROM warmup_params
-            WHERE total_count > 5
-            ORDER BY weighted_score DESC
-            LIMIT 10
-        """)
-        saved_params = [dict(row) for row in cur.fetchall()]
-        conn.close()
-        if not saved_params:
-            raise ValueError("安定したパラメータが見つかりません")
-    except Exception as e:
-        logging.warning(f"[Retry-OCR] 成功パラメータDB読み込み失敗または未取得: {e}")
-        saved_params = []
-
-    # パラメータがある場合はそれらを順に使う（最大10件）
-    for region in label_regions:
-        logging.info(f"Player_{player_number} の領域開始: {region}")
-        x_label, y_label, square_width, square_height = region
-        crop = img[y_label : y_label + square_height, x_label : x_label + square_width]
-        if crop.size == 0:
-            logging.warning(
-                f"Player_{player_number}: crop.size == 0 でスキップされました"
-            )
-            player_number += 1
-            continue
-        half = crop.shape[1] // 2
-        right_half = crop[:, half : crop.shape[1]]
-
-        ocr_success = False
-        debug_crop_b64 = None
-        debug_pre_b64 = None
-        # ループ外で ocr_text_list を初期化して未定義参照を防ぐ
-        ocr_text_list = []
-
-        for attempt, chosen in enumerate(saved_params):
-            threshold = to_int_safe(chosen["threshold"])
-            blur_ksize = to_int_safe(chosen["blur"])
-            contrast = stored_int_to_float(chosen["contrast_scaled"])
-            resize_ratio = stored_int_to_float(chosen["resize_ratio_scaled"])
-            gaussian_blur_ksize = to_int_safe(chosen.get("gaussian_blur", 0))
-            use_clahe = bool(chosen.get("use_clahe", False))
-
-            preprocessed_right = preprocess_image_for_ocr(
-                right_half,
-                threshold,
-                blur_ksize,
-                contrast,
-                resize_ratio,
-                gaussian_blur_ksize=gaussian_blur_ksize,
-                use_clahe=use_clahe,
-            )
-            ocr_text_list = extract_score_with_easyocr(preprocessed_right)
-
-            if len(ocr_text_list) >= 5:
-                try:
-                    perfect_val = int(ocr_text_list[0])
-                    great_val = int(ocr_text_list[1])
-                    good_val = int(ocr_text_list[2])
-                    bad_val = int(ocr_text_list[3])
-                    miss_val = int(ocr_text_list[4])
-
-                    if perfect_val == 0 or (
-                        perfect_val > 0 and great_val >= perfect_val * 1.5
-                    ):
-                        continue
-
-                    score_raw = (
-                        perfect_val * 3
-                        + great_val * 2
-                        + good_val * 1
-                        + bad_val * 0
-                        + miss_val * 0
-                    )
-                    score = math.floor(score_raw)
-                    ocr_success = True
+        _, encoded_image = cv2.imencode('.png', result_image)
+        response = make_response(encoded_image.tobytes())
+        response.headers['Content-Type'] = 'image/png'
+        return response
