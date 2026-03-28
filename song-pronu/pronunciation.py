@@ -226,17 +226,24 @@ def main():
     print(f"--- [Phase 1] Loading JSON files from {BASE_PATH} ---")
     if not os.path.exists(MUSIC_JSON):
         print(f"Error: {MUSIC_JSON} not found.")
-        print("Current directory:", os.getcwd())
         return
-
+    
     try:
+        # ファイルサイズを先にチェックしてログに出す
+        m_size = os.path.getsize(MUSIC_JSON) / (1024 * 1024)
+        a_size = os.path.getsize(ARTISTS_JSON) / (1024 * 1024)
+        print(f"DEBUG: MUSIC_JSON size: {m_size:.2f} MB")
+        print(f"DEBUG: ARTISTS_JSON size: {a_size:.2f} MB")
+
+        print("DEBUG: Calling json.load(MUSIC_JSON)...")
         with open(MUSIC_JSON, "r", encoding="utf-8") as f:
             music_data = json.load(f)
+        
+        print("DEBUG: Calling json.load(ARTISTS_JSON)...")
         with open(ARTISTS_JSON, "r", encoding="utf-8") as f:
             artist_data = json.load(f)
-        print(
-            f"Successfully loaded {len(music_data)} musics and {len(artist_data)} artists."
-        )
+            
+        print(f"Successfully loaded {len(music_data)} musics and {len(artist_data)} artists.")
     except Exception as e:
         print(f"Error during JSON loading: {e}")
         return
