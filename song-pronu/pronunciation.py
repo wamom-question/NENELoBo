@@ -101,7 +101,7 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
     # 小書き文字の定義（これらが含まれるフレーズは「打ちにくい」として排除）
     # ※ 長音「ー」は通常のフリック1回のためここには含めない
     unwanted_kana = set("ぁぃぅぇぉゃゅょっ")
-    del_space = {" ", "　", "・"}
+    del_space = {" ", "　", "・","〜"}
     phrases = []
 
     # スライディングウィンドウ
