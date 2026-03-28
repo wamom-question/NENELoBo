@@ -184,7 +184,7 @@ def run_hash_generation_system(intermediate_data):
     # 1. 全楽曲の全可能性 (n=2,3,4,5,6) を事前に集計して重複を厳密にチェック
     all_possible_hashes = []
     for song in intermediate_data:
-        for n in [2,3, 4, 5, 6]:
+        for n in [2, 3, 4, 5, 6]:
             hashes = get_song_all_hashes(song, n)
             all_possible_hashes.extend(hashes)
 
@@ -194,7 +194,7 @@ def run_hash_generation_system(intermediate_data):
     for song in intermediate_data:
         found = False
         # n=2 から 6 まで順に試行
-        for n in [2,3, 4, 5, 6]:
+        for n in [2, 3, 4, 5, 6]:
             current_hashes = get_song_all_hashes(song, n)
             # 世界で自分しか持っていないフレーズを抽出
             unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
@@ -260,7 +260,7 @@ def main():
     intermediate_data = build_intermediate_data(music_data, artist_data)
     print(f"Intermediate data built. Total songs to process: {len(intermediate_data)}")
 
-    print("--- [Phase 3] Running hash generation system (n=3 to 6) ---")
+    print("--- [Phase 3] Running hash generation system (n=2 to 6) ---")
     # 進行状況が見えるように、この関数内でログを出すようにします
     final_data = run_hash_generation_system(intermediate_data)
     print(f"Hash generation completed for {len(final_data)} songs.")
@@ -278,7 +278,7 @@ def run_hash_generation_system(intermediate_data):
     print("Step 1: Counting all possible phrases across all songs...")
     all_possible_hashes = []
     for i, song in enumerate(intermediate_data):
-        for n in [3, 4, 5, 6]:
+        for n in [2, 3, 4, 5, 6]:
             hashes = get_song_all_hashes(song, n)
             all_possible_hashes.extend(hashes)
         if (i + 1) % 100 == 0:
@@ -291,7 +291,7 @@ def run_hash_generation_system(intermediate_data):
     print("Step 2: Determining unique phrases for each song...")
     for i, song in enumerate(intermediate_data):
         found = False
-        for n in [3, 4, 5, 6]:
+        for n in [2, 3, 4, 5, 6]:
             current_hashes = get_song_all_hashes(song, n)
             unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
 
