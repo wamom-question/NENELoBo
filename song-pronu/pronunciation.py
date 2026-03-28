@@ -53,12 +53,13 @@ def build_intermediate_data(music_data, artist_data):
             "songPronunciation": music.get("pronunciation", ""),
             "creatorArtistPronunciation": creator_pron,
             "lyricistPronunciation": lyricist_pron,
-            "composer_pronunciation": composer_pron,
+            "composerPronunciation": composer_pron,
             "arrangerPronunciation": arranger_pron,
         }
         intermediate_list.append(obj)
 
     return intermediate_list
+
 
 def split_into_morae(text: str) -> list[str]:
     """
@@ -248,17 +249,19 @@ def main():
 
     upload_to_spreadsheet(final_data)
 
-@app.route('/update', methods=['POST', 'GET'])
+
+@app.route("/update", methods=["POST", "GET"])
 def trigger_update():
     global is_processing
-    
+
     if is_processing:
         return jsonify({"status": "error", "message": "Already processing"}), 429
 
     thread = threading.Thread(target=run_process)
     thread.start()
-    
+
     return jsonify({"status": "success", "message": "Update triggered"}), 202
+
 
 def run_process():
     global is_processing
@@ -272,6 +275,7 @@ def run_process():
     finally:
         is_processing = False
 
+
 if __name__ == "__main__":
     threading.Thread(target=run_process).start()
-    app.run(host='0.0.0.0', port=53749)
+    app.run(host="0.0.0.0", port=53749)
