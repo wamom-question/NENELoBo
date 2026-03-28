@@ -63,18 +63,41 @@ def build_intermediate_data(music_data, artist_data):
 
 
 def katakana_to_hiragana(text: str) -> str:
-    res = ""
-    for c in text:
-        if "\u30a1" <= c <= "\u30f4":
-            res += chr(ord(c) - 0x60)
-        else:
-            res += c
-    return res
+    """
+    カタカナをひらがなに正規化する。
+    計算ではなく置換テーブル（dict）を用いることで、ヴ(U+30F4)などの例外を確実に処理する。
+    """
+    if not text:
+        return ""
+
+    # 基本的なカタカナからひらがなへのマッピング
+    # ァ(30A1)〜ヶ(30F6) までの全対応リスト（計算で生成しても良いが、ここでは確実性を重視）
+    katakana = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヰヱヲンガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポァィゥェォッャュョヮヴヵヶ"
+    hiragana = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをんがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽぁぃぅぇぉっゃゅょゎゔゕゖ"
+
+    mapping = str.maketrans(katakana, hiragana)
+
+    # 濁点・半濁点の結合文字（が、ぱ等）が個別に来るケースも考慮し、
+    # 最終的に文字コード計算をフォールバックとして残すか、そのまま返す
+    return text.translate(mapping)
 
 
 def is_valid_phrase(phrase: str) -> bool:
-    """ひらがなとーのみで構成されているか判定"""
-    return bool(re.fullmatch(r"[\u3041-\u3096ー]+", phrase))
+    """
+    フレーズが許可された「打ちやすいひらがな」と「ー」のみで構成されているか判定。
+    小書き文字（ぁぃぅぇぉゃゅょっ）は generate_phrases 側で除外済み。
+    """
+    if not phrase:
+        return False
+
+    # 許可する文字のホワイトリスト（清音、濁音、半濁音、および「ゔ」、「ー」）
+    # ※ 小書き文字はこのリストに入っていないため、ここで最終ガードされる
+    allowed_chars = set(
+        "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわゐゑをんがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽ"
+    )
+
+    # フレーズ内の全文字がホワイトリストに含まれているか確認
+    return all(char in allowed_chars for char in phrase)
 
 
 def generate_phrases(text: str, n: int) -> list[str]:
@@ -89,7 +112,7 @@ def generate_phrases(text: str, n: int) -> list[str]:
     text = katakana_to_hiragana(text)
 
     # 排除対象（小書き文字など）
-    unwanted_kana = set("ぁぃぅぇぉゃゅょっ")
+    unwanted_kana = set("ぁぃぅぇぉっゃゅょゎゕゖゔ")
     phrases = []
 
     # モーラ結合をせず、単純に1文字ずつスライド
@@ -213,7 +236,6 @@ def run_hash_generation_system(intermediate_data):
             unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
 
             if unique_phrases:
-                # --- [追加] 濁点なし（清音）のフレーズを優先する処理 ---
                 pure_phrases = [h for h in unique_phrases if is_pure_hiragana(h)]
 
                 if pure_phrases:
