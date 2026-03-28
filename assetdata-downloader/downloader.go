@@ -17,42 +17,45 @@ func main() {
         "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main/musicArtists.json",
     }
 
-    // ディレクトリの作成
     dir := "/app/assets"
     if err := os.MkdirAll(dir, os.ModePerm); err != nil {
         log.Fatalf("ディレクトリの作成に失敗しました: %v", err)
     }
 
-    for _, url := range urls {
-        filename := dir + "/" + getFileName(url) // フルパスを指定
-        if err := downloadJSON(url, filename); err != nil {
-            log.Printf("初回ダウンロード失敗: %v", err)
+    // 共通の実行ロジックを関数化して呼び出す
+    runUpdateProcess := func() {
+        allDownloaded := true
+        for _, url := range urls {
+            filename := dir + "/" + getFileName(url)
+            if err := downloadJSON(url, filename); err != nil {
+                log.Printf("ダウンロード失敗 (%s): %v", url, err)
+                allDownloaded = false
+            }
+        }
+        if allDownloaded {
+            triggerPythonUpdate()
         }
     }
 
+    // 1. 起動時に即時実行（これで Python 側が動き出す）
+    log.Println("起動時の初回チェックを開始します...")
+    runUpdateProcess()
+
+    // 2. 定期実行ループ
+    lastExecutedHour := -1
     for {
-            now := time.Now().In(time.FixedZone("Asia/Tokyo", 9*60*60))
-            if now.Minute() == 0 {
-                allDownloaded := true
-                for _, url := range urls {
-                    filename := dir + "/" + getFileName(url)
-                    if err := downloadJSON(url, filename); err != nil {
-                        log.Printf("ダウンロード失敗 (%s): %v", url, err)
-                        allDownloaded = false // 1つでも失敗したらフラグを倒す
-                    }
-                }
-
-                // 全ファイルのダウンロード試行が終わったタイミングで通知
-                // (少なくとも 1 時間に 1 回、全ファイルを最新にした状態で Python を動かす)
-                if allDownloaded {
-                    triggerPythonUpdate()
-                }
-
-                time.Sleep(time.Hour)
-            } else {
-                time.Sleep(time.Minute)
-            }
+        now := time.Now().In(time.FixedZone("Asia/Tokyo", 9*60*60))
+        
+        // 「0分」かつ「今の一時間でまだ実行していない」場合に実行
+        if now.Minute() == 0 && now.Hour() != lastExecutedHour {
+            log.Printf("%d:00 の定期更新を開始します...", now.Hour())
+            runUpdateProcess()
+            lastExecutedHour = now.Hour()
         }
+        
+        time.Sleep(30 * time.Second) // 30秒ごとにチェック
+    }
+}
 
 func triggerPythonUpdate() {
     // コンテナ名（song-pronu）とポートを指定
