@@ -70,7 +70,7 @@ def split_into_morae(text: str) -> list[str]:
         return []
 
     # 小書き文字の定義
-    small_kana = set("ぁぃぅぇぉゃゅょっァィゥェォャュョ")
+    small_kana = set("鬱")
 
     morae = []
     i = 0
@@ -112,7 +112,7 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
         # 1. フレーズ内に小書き文字が含まれていたらスキップ
         if any(char in unwanted_kana for char in joined_phrase):
             continue
-            
+
         # 2. 空白や区切り文字が含まれていたらスキップ
         if any(s in joined_phrase for s in del_space):
             continue
@@ -122,7 +122,7 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
     return phrases
 
 
-def process_all_songs_initial_hash(intermediate_data, n=3):
+def process_all_songs_initial_hash(intermediate_data, n=2):
     """
     全楽曲の各項目からハッシュを生成し、全ハッシュのフラットリストを作成する。
     1曲の中で重複するハッシュは事前に統合する。
@@ -233,7 +233,7 @@ def main():
     if not os.path.exists(MUSIC_JSON):
         print(f"Error: {MUSIC_JSON} not found.")
         return
-    
+
     try:
         # ファイルサイズを先にチェックしてログに出す
         m_size = os.path.getsize(MUSIC_JSON) / (1024 * 1024)
@@ -244,12 +244,14 @@ def main():
         print("DEBUG: Calling json.load(MUSIC_JSON)...")
         with open(MUSIC_JSON, "r", encoding="utf-8") as f:
             music_data = json.load(f)
-        
+
         print("DEBUG: Calling json.load(ARTISTS_JSON)...")
         with open(ARTISTS_JSON, "r", encoding="utf-8") as f:
             artist_data = json.load(f)
-            
-        print(f"Successfully loaded {len(music_data)} musics and {len(artist_data)} artists.")
+
+        print(
+            f"Successfully loaded {len(music_data)} musics and {len(artist_data)} artists."
+        )
     except Exception as e:
         print(f"Error during JSON loading: {e}")
         return
