@@ -98,7 +98,7 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
         return []
 
     skip_kana = set("ぁぃぅぇぉゃゅょっァィゥェォャュョッー")
-    del_space = {" ", "　"}
+    del_space = {" ", "　","・"}
     phrases = []
 
     # スライディングウィンドウ
