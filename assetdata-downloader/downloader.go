@@ -14,6 +14,7 @@ func main() {
     urls := []string{
         "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main/musics.json",
         "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main/musicDifficulties.json",
+        "https://raw.githubusercontent.com/Sekai-World/sekai-master-db-diff/refs/heads/main/musicArtists.json",
     }
 
     // ディレクトリの作成
@@ -22,21 +23,55 @@ func main() {
         log.Fatalf("ディレクトリの作成に失敗しました: %v", err)
     }
 
-    for {
-        now := time.Now().In(time.FixedZone("Asia/Tokyo", 9*60*60)) // 日本時間に変換
-        if now.Minute() == 0 { // 分が0のとき
-            for _, url := range urls {
-                filename := dir + "/" + getFileName(url) // フルパスを指定
-                if err := downloadJSON(url, filename); err != nil {
-                    log.Printf("ダウンロード失敗: %v", err)
-                }
-            }
-            // 1時間待機
-            time.Sleep(time.Hour)
-        } else {
-            // 1分待機
-            time.Sleep(time.Minute)
+    for _, url := range urls {
+        filename := dir + "/" + getFileName(url) // フルパスを指定
+        if err := downloadJSON(url, filename); err != nil {
+            log.Printf("初回ダウンロード失敗: %v", err)
         }
+    }
+
+    for {
+            now := time.Now().In(time.FixedZone("Asia/Tokyo", 9*60*60))
+            if now.Minute() == 0 {
+                allDownloaded := true
+                for _, url := range urls {
+                    filename := dir + "/" + getFileName(url)
+                    if err := downloadJSON(url, filename); err != nil {
+                        log.Printf("ダウンロード失敗 (%s): %v", url, err)
+                        allDownloaded = false // 1つでも失敗したらフラグを倒す
+                    }
+                }
+
+                // 全ファイルのダウンロード試行が終わったタイミングで通知
+                // (少なくとも 1 時間に 1 回、全ファイルを最新にした状態で Python を動かす)
+                if allDownloaded {
+                    triggerPythonUpdate()
+                }
+
+                time.Sleep(time.Hour)
+            } else {
+                time.Sleep(time.Minute)
+            }
+        }
+
+func triggerPythonUpdate() {
+    // コンテナ名（song-pronu）とポートを指定
+    url := "http://song-pronu:53749/update"
+
+    // タイムアウトを設定したクライアント
+    client := &http.Client{Timeout: 10 * time.Second}
+
+    resp, err := client.Post(url, "application/json", nil)
+    if err != nil {
+        log.Printf("Python側への通知に失敗しました: %v", err)
+        return
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK {
+        log.Println("Python側に更新通知を送信しました")
+    } else {
+        log.Printf("Python側がエラーを返しました: ステータス %d", resp.StatusCode)
     }
 }
 

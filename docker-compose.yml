@@ -1,0 +1,15 @@
+services:
+  song-pronu:
+    build: song-pronu/.
+    volumes:
+      - ./assets:/app/assets
+    networks:
+      - botnet-dev
+    env_file:
+      - .env
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+networks:
+  botnet-dev:
