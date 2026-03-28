@@ -63,10 +63,13 @@ def build_intermediate_data(music_data, artist_data):
 
 
 def katakana_to_hiragana(text: str) -> str:
-    """カタカナをひらがなに変換する"""
-    return "".join(
-        [chr(ord(c) - 0x60) if "\u30a1" <= c <= "\u30f6" else c for c in text]
-    )
+    res = ""
+    for c in text:
+        if "\u30a1" <= c <= "\u30f4":
+            res += chr(ord(c) - 0x60)
+        else:
+            res += c
+    return res
 
 
 def is_valid_phrase(phrase: str) -> bool:
