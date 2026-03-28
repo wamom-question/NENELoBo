@@ -89,7 +89,6 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
     del_space = {" ", "　"}
     phrases = []
 
-    # スライディングウィンドウ
     for i in range(len(morae) - n + 1):
         window = morae[i : i + n]
         joined_phrase = "".join(window)
