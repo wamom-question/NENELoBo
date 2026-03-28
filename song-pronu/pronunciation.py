@@ -93,12 +93,15 @@ def split_into_morae(text: str) -> list[str]:
 def generate_phrases(morae: list[str], n: int) -> list[str]:
     """
     モーラリストからn-モーラのハッシュ（フレーズ）を抽出する。
+    小書き文字を含むフレーズ、または特定の記号を含むフレーズを排除する。
     """
     if len(morae) < n:
         return []
 
-    skip_kana = set("ぁぃぅぇぉゃゅょっァィゥェォャュョッー")
-    del_space = {" ", "　","・"}
+    # 小書き文字の定義（これらが含まれるフレーズは「打ちにくい」として排除）
+    # ※ 長音「ー」は通常のフリック1回のためここには含めない
+    unwanted_kana = set("ぁぃぅぇぉゃゅょっ")
+    del_space = {" ", "　", "・"}
     phrases = []
 
     # スライディングウィンドウ
@@ -106,12 +109,15 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
         window = morae[i : i + n]
         joined_phrase = "".join(window)
 
-        if window[0][0] in skip_kana:
+        # 1. フレーズ内に小書き文字が含まれていたらスキップ
+        if any(char in unwanted_kana for char in joined_phrase):
             continue
+            
+        # 2. 空白や区切り文字が含まれていたらスキップ
         if any(s in joined_phrase for s in del_space):
             continue
 
-        phrases.append("".join(window))
+        phrases.append(joined_phrase)
 
     return phrases
 
