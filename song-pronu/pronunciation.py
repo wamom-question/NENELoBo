@@ -223,31 +223,77 @@ def upload_to_spreadsheet(data):
 
 
 def main():
+    print(f"--- [Phase 1] Loading JSON files from {BASE_PATH} ---")
     if not os.path.exists(MUSIC_JSON):
         print(f"Error: {MUSIC_JSON} not found.")
-        # 現在のディレクトリ構造を表示してデバッグしやすくする
         print("Current directory:", os.getcwd())
-        print(
-            "Files in /app:",
-            os.listdir("/app") if os.path.exists("/app") else "No /app dir",
-        )
         return
-    # フェーズ1: 読み込みと結合
-    with open(MUSIC_JSON, "r", encoding="utf-8") as f:
-        music_data = json.load(f)
-    with open(ARTISTS_JSON, "r", encoding="utf-8") as f:
-        artist_data = json.load(f)
 
+    try:
+        with open(MUSIC_JSON, "r", encoding="utf-8") as f:
+            music_data = json.load(f)
+        with open(ARTISTS_JSON, "r", encoding="utf-8") as f:
+            artist_data = json.load(f)
+        print(
+            f"Successfully loaded {len(music_data)} musics and {len(artist_data)} artists."
+        )
+    except Exception as e:
+        print(f"Error during JSON loading: {e}")
+        return
+
+    print("--- [Phase 2] Building intermediate data (Applying Skip List) ---")
     intermediate_data = build_intermediate_data(music_data, artist_data)
+    print(f"Intermediate data built. Total songs to process: {len(intermediate_data)}")
 
-    # フェーズ4: ハッシュ生成（救済措置込み）
+    print("--- [Phase 3] Running hash generation system (n=3 to 6) ---")
+    # 進行状況が見えるように、この関数内でログを出すようにします
     final_data = run_hash_generation_system(intermediate_data)
+    print(f"Hash generation completed for {len(final_data)} songs.")
 
-    # フェーズ5: 書き出し
+    print(f"--- [Phase 4] Writing output to {OUTPUT_JSON} ---")
     with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
         json.dump(final_data, f, indent=2, ensure_ascii=False)
 
+    print("--- [Phase 5] Uploading to Google Spreadsheet ---")
     upload_to_spreadsheet(final_data)
+
+
+def run_hash_generation_system(intermediate_data):
+    # 1. 全楽曲の全可能性を事前に集計
+    print("Step 1: Counting all possible phrases across all songs...")
+    all_possible_hashes = []
+    for i, song in enumerate(intermediate_data):
+        for n in [3, 4, 5, 6]:
+            hashes = get_song_all_hashes(song, n)
+            all_possible_hashes.extend(hashes)
+        if (i + 1) % 100 == 0:
+            print(f"  Processed {i + 1} songs for global count...")
+
+    global_counts = Counter(all_possible_hashes)
+    print(f"Global phrase dictionary built. Unique phrases found: {len(global_counts)}")
+
+    # 2. 各楽曲のハッシュ確定処理
+    print("Step 2: Determining unique phrases for each song...")
+    for i, song in enumerate(intermediate_data):
+        found = False
+        for n in [3, 4, 5, 6]:
+            current_hashes = get_song_all_hashes(song, n)
+            unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
+
+            if unique_phrases:
+                song["search_phrases"] = unique_phrases
+                song["phrases_count"] = n
+                found = True
+                break
+
+        if not found:
+            song["search_phrases"] = [song.get("songPronunciation", "UNKNOWN")]
+            song["phrases_count"] = 6
+
+        if (i + 1) % 100 == 0:
+            print(f"  Finalized {i + 1} songs...")
+
+    return intermediate_data
 
 
 @app.route("/update", methods=["POST", "GET"])
