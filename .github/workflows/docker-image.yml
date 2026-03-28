@@ -31,6 +31,8 @@ jobs:
               - 'bot-mini/**'
             assetdata-downloader:
               - 'assetdata-downloader/**'
+            song-pronu:
+              - 'song-pronu/**'
 
   # 変更があったサービスのみをビルド・プッシュするジョブ
   build-and-push:
