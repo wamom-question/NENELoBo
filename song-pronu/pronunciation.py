@@ -181,10 +181,10 @@ def get_song_all_hashes(song, n):
 
 
 def run_hash_generation_system(intermediate_data):
-    # 1. 全楽曲の全可能性 (n=3,4,5,6) を事前に集計して重複を厳密にチェック
+    # 1. 全楽曲の全可能性 (n=2,3,4,5,6) を事前に集計して重複を厳密にチェック
     all_possible_hashes = []
     for song in intermediate_data:
-        for n in [3, 4, 5, 6]:
+        for n in [2,3, 4, 5, 6]:
             hashes = get_song_all_hashes(song, n)
             all_possible_hashes.extend(hashes)
 
@@ -193,8 +193,8 @@ def run_hash_generation_system(intermediate_data):
     # 2. 各楽曲のハッシュ確定処理
     for song in intermediate_data:
         found = False
-        # n=3 から 6 まで順に試行
-        for n in [3, 4, 5, 6]:
+        # n=2 から 6 まで順に試行
+        for n in [2,3, 4, 5, 6]:
             current_hashes = get_song_all_hashes(song, n)
             # 世界で自分しか持っていないフレーズを抽出
             unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
