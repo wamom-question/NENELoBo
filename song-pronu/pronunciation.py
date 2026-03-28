@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 from collections import Counter
 
@@ -61,109 +62,52 @@ def build_intermediate_data(music_data, artist_data):
     return intermediate_list
 
 
-def split_into_morae(text: str) -> list[str]:
+def katakana_to_hiragana(text: str) -> str:
+    """カタカナをひらがなに変換する"""
+    return "".join(
+        [chr(ord(c) - 0x60) if "\u30a1" <= c <= "\u30f6" else c for c in text]
+    )
+
+
+def is_valid_phrase(phrase: str) -> bool:
+    """ひらがなとーのみで構成されているか判定"""
+    return bool(re.fullmatch(r"[\u3041-\u3096ー]+", phrase))
+
+
+def generate_phrases(text: str, n: int) -> list[str]:
     """
-    文字列をモーラ（音節）単位に分割する。
-    小書き文字（ぁぃぅぇぉゃゅょ等）は直前の文字と結合する。
+    1文字ずつスライドしてn文字のハッシュを抽出。
+    小書き文字や記号が含まれるものはこの段階で除外する。
     """
-    if not text:
+    if not text or len(text) < n:
         return []
 
-    # 小書き文字の定義
-    small_kana = set("鬱")
+    # ひらがなに正規化
+    text = katakana_to_hiragana(text)
 
-    morae = []
-    i = 0
-    length = len(text)
-
-    while i < length:
-        current_char = text[i]
-
-        # 次の文字が存在し、かつそれが小書き文字であれば結合
-        if i + 1 < length and text[i + 1] in small_kana:
-            morae.append(current_char + text[i + 1])
-            i += 2  # 2文字分進む
-        else:
-            morae.append(current_char)
-            i += 1  # 1文字分進む
-
-    return morae
-
-
-def generate_phrases(morae: list[str], n: int) -> list[str]:
-    """
-    モーラリストからn-モーラのハッシュ（フレーズ）を抽出する。
-    小書き文字を含むフレーズ、または特定の記号を含むフレーズを排除する。
-    """
-    if len(morae) < n:
-        return []
-
-    # 小書き文字の定義（これらが含まれるフレーズは「打ちにくい」として排除）
-    # ※ 長音「ー」は通常のフリック1回のためここには含めない
+    # 排除対象（小書き文字など）
     unwanted_kana = set("ぁぃぅぇぉゃゅょっ")
-    del_space = {" ", "　", "・","〜"}
     phrases = []
 
-    # スライディングウィンドウ
-    for i in range(len(morae) - n + 1):
-        window = morae[i : i + n]
-        joined_phrase = "".join(window)
+    # モーラ結合をせず、単純に1文字ずつスライド
+    for i in range(len(text) - n + 1):
+        window = text[i : i + n]
 
-        # 1. フレーズ内に小書き文字が含まれていたらスキップ
-        if any(char in unwanted_kana for char in joined_phrase):
+        # 1. 小書き文字が含まれていたらスキップ
+        if any(char in unwanted_kana for char in window):
             continue
 
-        # 2. 空白や区切り文字が含まれていたらスキップ
-        if any(s in joined_phrase for s in del_space):
+        # 2. 有効な文字種（ひらがな・ー）以外が含まれていたらスキップ
+        if not is_valid_phrase(window):
             continue
 
-        phrases.append(joined_phrase)
+        phrases.append(window)
 
     return phrases
 
 
-def process_all_songs_initial_hash(intermediate_data, n=2):
-    """
-    全楽曲の各項目からハッシュを生成し、全ハッシュのフラットリストを作成する。
-    1曲の中で重複するハッシュは事前に統合する。
-    """
-    all_generated_hashes = []
-
-    target_keys = [
-        "songPronunciation",
-        "creatorArtistPronunciation",
-        "lyricistPronunciation",
-        "composerPronunciation",
-        "arrangerPronunciation",
-    ]
-
-    for song in intermediate_data:
-        song_raw_hashes = []
-        for key in target_keys:
-            text = song.get(key, "")
-            if not text:
-                continue
-
-            morae = split_into_morae(text)
-            phrases = generate_phrases(morae, n)
-            song_raw_hashes.extend(phrases)
-
-        # --- 統合処理 (1曲内での重複排除) ---
-        # dict.fromkeys() を使うことで、順序を維持したまま重複を消せます
-        unique_song_hashes = list(dict.fromkeys(song_raw_hashes))
-
-        song["temp_hashes"] = unique_song_hashes
-        # グローバル集計用（このリストには全曲分がフラットに入る）
-        all_generated_hashes.extend(unique_song_hashes)
-
-    return all_generated_hashes, intermediate_data
-
-
 def get_song_all_hashes(song, n):
-    """
-    特定の曲の全項目から、指定されたnモーラのハッシュを抽出し、
-    曲内でユニーク化したリストを返す。
-    """
+    """特定の曲の全項目から指定されたn文字のハッシュを抽出"""
     target_keys = [
         "songPronunciation",
         "creatorArtistPronunciation",
@@ -173,44 +117,10 @@ def get_song_all_hashes(song, n):
     ]
     raw_hashes = []
     for key in target_keys:
-        morae = split_into_morae(song.get(key, ""))
-        raw_hashes.extend(generate_phrases(morae, n))
+        # split_into_morae を介さず直接呼ぶ
+        raw_hashes.extend(generate_phrases(song.get(key, ""), n))
 
-    # 順序を維持して曲内ユニーク化
     return list(dict.fromkeys(raw_hashes))
-
-
-def run_hash_generation_system(intermediate_data):
-    # 1. 全楽曲の全可能性 (n=2,3,4,5,6) を事前に集計して重複を厳密にチェック
-    all_possible_hashes = []
-    for song in intermediate_data:
-        for n in [2, 3, 4, 5, 6]:
-            hashes = get_song_all_hashes(song, n)
-            all_possible_hashes.extend(hashes)
-
-    global_counts = Counter(all_possible_hashes)
-
-    # 2. 各楽曲のハッシュ確定処理
-    for song in intermediate_data:
-        found = False
-        # n=2 から 6 まで順に試行
-        for n in [2, 3, 4, 5, 6]:
-            current_hashes = get_song_all_hashes(song, n)
-            # 世界で自分しか持っていないフレーズを抽出
-            unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
-
-            if unique_phrases:
-                song["search_phrases"] = unique_phrases
-                song["phrases_count"] = n
-                found = True
-                break
-
-        # 3. 【追加仕様】全滅（n=6までで見つからない）または文字数不足の場合の救済
-        if not found:
-            song["search_phrases"] = [song["songPronunciation"]]
-            song["phrases_count"] = 6  # 探索終了のフラグとしてn=6を保持
-
-    return intermediate_data
 
 
 def upload_to_spreadsheet(data):
