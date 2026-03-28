@@ -186,22 +186,26 @@ def main():
     upload_to_spreadsheet(final_data)
 
 
+def is_pure_hiragana(phrase: str) -> bool:
+    """濁点・半濁点（および『ゔ』）を含まない、完全な清音のみか判定"""
+    # 濁点・半濁点が付く可能性のある範囲を除外した正規表現
+    # ゔ(U+3094), が〜ぼ(U+304c-307bの隔字), ぱ〜ぽ(U+307d-307fの隔字) などをチェック
+    # 簡易的には「濁点・半濁点文字」のセットに含まれないかを確認
+    impure_chars = "ゔがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽ"
+    return not any(char in impure_chars for char in phrase)
+
+
 def run_hash_generation_system(intermediate_data):
-    # 1. 全楽曲の全可能性を事前に集計
-    print("Step 1: Counting all possible phrases across all songs...")
+    print("Step 1: Counting all possible phrases...")
     all_possible_hashes = []
-    for i, song in enumerate(intermediate_data):
+    for song in intermediate_data:
         for n in [2, 3, 4, 5, 6]:
             hashes = get_song_all_hashes(song, n)
             all_possible_hashes.extend(hashes)
-        if (i + 1) % 100 == 0:
-            print(f"  Processed {i + 1} songs for global count...")
 
     global_counts = Counter(all_possible_hashes)
-    print(f"Global phrase dictionary built. Unique phrases found: {len(global_counts)}")
 
-    # 2. 各楽曲のハッシュ確定処理
-    print("Step 2: Determining unique phrases for each song...")
+    print("Step 2: Determining unique phrases with Pure-Hiragana priority...")
     for i, song in enumerate(intermediate_data):
         found = False
         for n in [2, 3, 4, 5, 6]:
@@ -209,7 +213,16 @@ def run_hash_generation_system(intermediate_data):
             unique_phrases = [h for h in current_hashes if global_counts[h] == 1]
 
             if unique_phrases:
-                song["search_phrases"] = unique_phrases
+                # --- [追加] 濁点なし（清音）のフレーズを優先する処理 ---
+                pure_phrases = [h for h in unique_phrases if is_pure_hiragana(h)]
+
+                if pure_phrases:
+                    # 清音のみの候補があるなら、それだけを採用
+                    song["search_phrases"] = pure_phrases
+                else:
+                    # 全候補に濁点があるなら、仕方ないのでそのまま採用
+                    song["search_phrases"] = unique_phrases
+
                 song["phrases_count"] = n
                 found = True
                 break
