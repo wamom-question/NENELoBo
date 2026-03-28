@@ -17,37 +17,48 @@ API_KEY = os.getenv("SEKAI_UNIQUE_API_KEY")
 BASE_PATH = "/app/assets"
 MUSIC_JSON = os.path.join(BASE_PATH, "musics.json")
 ARTISTS_JSON = os.path.join(BASE_PATH, "musicArtists.json")
+SKIP_JSON = os.path.join(BASE_PATH, "music_skip.json")
 OUTPUT_JSON = os.path.join(BASE_PATH, "song_pronunciation.json")
 
 
 def build_intermediate_data(music_data, artist_data):
-    # アーティスト検索用の辞書を作成（ID引きと名前引きの両方を用意）
+    # --- スキップリストの読み込み ---
+    skip_ids = set()
+    if os.path.exists(SKIP_JSON):
+        try:
+            with open(SKIP_JSON, "r", encoding="utf-8") as f:
+                skip_ids = set(json.load(f))
+        except Exception as e:
+            print(f"Warning: Failed to load skip list: {e}")
+
+    # アーティスト検索用の辞書
     artists_by_id = {a["id"]: a["pronunciation"] for a in artist_data}
     artists_by_name = {a["name"]: a["pronunciation"] for a in artist_data}
 
     intermediate_list = []
 
     for music in music_data:
-        # 各項目の読みを取得（存在しない場合は空文字）
+        # --- スキップ判定 ---
+        if music.get("id") in skip_ids:
+            continue
+
         creator_pron = artists_by_id.get(music.get("creatorArtistId"), "")
         lyricist_pron = artists_by_name.get(music.get("lyricist"), "")
         composer_pron = artists_by_name.get(music.get("composer"), "")
         arranger_pron = artists_by_name.get(music.get("arranger"), "")
 
-        # 中間オブジェクトの構築
         obj = {
             "id": music.get("id"),
             "title": music.get("title"),
             "songPronunciation": music.get("pronunciation", ""),
             "creatorArtistPronunciation": creator_pron,
             "lyricistPronunciation": lyricist_pron,
-            "composerPronunciation": composer_pron,
+            "composer_pronunciation": composer_pron,
             "arrangerPronunciation": arranger_pron,
         }
         intermediate_list.append(obj)
 
     return intermediate_list
-
 
 def split_into_morae(text: str) -> list[str]:
     """
@@ -89,6 +100,7 @@ def generate_phrases(morae: list[str], n: int) -> list[str]:
     del_space = {" ", "　"}
     phrases = []
 
+    # スライディングウィンドウ
     for i in range(len(morae) - n + 1):
         window = morae[i : i + n]
         joined_phrase = "".join(window)
