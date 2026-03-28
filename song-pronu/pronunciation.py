@@ -2,6 +2,7 @@ import json
 import os
 import re
 import threading
+import unicodedata
 from collections import Counter
 
 import requests
@@ -65,10 +66,11 @@ def build_intermediate_data(music_data, artist_data):
 def katakana_to_hiragana(text: str) -> str:
     """
     カタカナをひらがなに正規化する。
-    計算ではなく置換テーブル（dict）を用いることで、ヴ(U+30F4)などの例外を確実に処理する。
     """
     if not text:
         return ""
+
+    text = unicodedata.normalize("NFC", text)
 
     # 基本的なカタカナからひらがなへのマッピング
     # ァ(30A1)〜ヶ(30F6) までの全対応リスト（計算で生成しても良いが、ここでは確実性を重視）
